@@ -590,7 +590,7 @@ export default function Home() {
                       ref={inputRef}
                       data-testid="input-url"
                       type="url"
-                      placeholder="Paste a URL — YouTube, Facebook, TikTok, or any direct file…"
+                      placeholder="Paste a URL..."
                       value={url}
                       onChange={(e) => { setUrl(e.target.value); setAnalyzeError(""); setUrlInfo(null); }}
                       onKeyDown={handleKeyDown}
