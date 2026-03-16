@@ -17,6 +17,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
 import { ThemeContext } from "@/App";
+import { Link } from "wouter";
 import { apiRequest } from "@/lib/queryClient";
 import type { User as UserType, Download as DownloadType, UrlInfo, QualityOption } from "@shared/schema";
 import { formatDistanceToNow } from "date-fns";
@@ -768,7 +769,9 @@ export default function Home() {
             <span className="font-semibold text-foreground">FluxDown</span>
             <span>· Made by Joshua Apostol</span>
           </div>
-          <p>Download responsibly. Respect copyright and platform terms of service.</p>
+          <Link href="/terms-&-privacy">
+            <span className="hover:text-foreground transition-colors cursor-pointer">Terms & Privacy</span>
+          </Link>
         </div>
       </footer>
     </div>
