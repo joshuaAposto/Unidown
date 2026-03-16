@@ -148,10 +148,7 @@ export default function TermsAndPrivacy() {
 
           <Section icon={<Users className="w-4 h-4" />} title="User Accounts">
             <p>
-              FluxDown uses a simple name-based registration to personalize your experience. No email address or password is required. Your account is tied to your device using a randomly generated device ID.
-            </p>
-            <p>
-              You can clear your browser data at any time to reset your local session. Your download history stored in our database is linked to your device ID.
+              FluxDown uses a simple name-based registration to personalize your experience. No email address or password is required. Your account is tied to your device using a randomly generated device ID stored securely in our database.
             </p>
           </Section>
         </div>
@@ -167,10 +164,10 @@ export default function TermsAndPrivacy() {
           <div className="h-px bg-border" />
 
           <Section icon={<Eye className="w-4 h-4" />} title="Information We Collect">
-            <p>When you use FluxDown, we collect and store the following information:</p>
+            <p>When you use FluxDown, we collect and store the following information in our database:</p>
             <ul className="list-disc list-inside space-y-1 mt-1">
               <li><span className="text-foreground font-medium">Display name</span> — the name you enter when you first visit</li>
-              <li><span className="text-foreground font-medium">Device ID</span> — a randomly generated identifier stored in your browser</li>
+              <li><span className="text-foreground font-medium">Device ID</span> — a randomly generated identifier linked to your account</li>
               <li><span className="text-foreground font-medium">IP address</span> — recorded at registration for abuse prevention</li>
               <li><span className="text-foreground font-medium">Download history</span> — the URLs, titles, platforms, and timestamps of your downloads</li>
             </ul>
@@ -189,16 +186,10 @@ export default function TermsAndPrivacy() {
 
           <Section icon={<Shield className="w-4 h-4" />} title="Data Storage">
             <p>
-              All data is stored securely in a cloud-hosted PostgreSQL database (Neon). Your data is retained as long as your device ID exists in your browser's local storage.
+              All data is stored securely in a cloud-hosted PostgreSQL database (Neon). Your account and download history are tied to your device ID and saved directly in our database.
             </p>
             <p>
               We do not store the actual downloaded media files — only metadata (title, platform, URL, timestamp) about the downloads.
-            </p>
-          </Section>
-
-          <Section icon={<Eye className="w-4 h-4" />} title="Cookies & Local Storage">
-            <p>
-              FluxDown uses your browser's local storage to store your device ID and theme preference. We do not use advertising cookies or third-party trackers.
             </p>
           </Section>
 
@@ -206,8 +197,7 @@ export default function TermsAndPrivacy() {
             <p>You have the right to:</p>
             <ul className="list-disc list-inside space-y-1 mt-1">
               <li>Delete individual entries from your personal download history at any time</li>
-              <li>Clear your browser's local storage to remove your device association</li>
-              <li>Request deletion of your account data by contacting us</li>
+              <li>Request full deletion of your account data by contacting us</li>
             </ul>
           </Section>
 
