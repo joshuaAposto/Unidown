@@ -27,6 +27,40 @@ app.use(
 
 app.use(express.urlencoded({ extended: false }));
 
+// ─── Facebook/social crawler: serve OG meta tags ───────────────────────────
+app.get("/", (req, res, next) => {
+  const ua = req.headers["user-agent"] || "";
+  const isSocialBot = /facebookexternalhit|Facebot|Twitterbot|LinkedInBot|WhatsApp|Slackbot|TelegramBot|Discordbot/i.test(ua);
+  if (!isSocialBot) return next();
+
+  const host = req.headers.host || req.hostname;
+  const proto = req.headers["x-forwarded-proto"] || "https";
+  const baseUrl = `${proto}://${host}`;
+
+  res.setHeader("Content-Type", "text/html; charset=utf-8");
+  res.send(`<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8" />
+  <title>FluxDown – Free Media Downloader</title>
+  <meta name="description" content="Download videos and audio from YouTube, TikTok, Instagram, Facebook, Vimeo, and more. Fast, free, no signup required." />
+  <meta property="og:type" content="website" />
+  <meta property="og:url" content="${baseUrl}/" />
+  <meta property="og:site_name" content="FluxDown" />
+  <meta property="og:title" content="FluxDown – Free Media Downloader" />
+  <meta property="og:description" content="Download videos and audio from YouTube, TikTok, Instagram, Facebook, Vimeo, and more. Fast, free, no signup required." />
+  <meta property="og:image" content="${baseUrl}/og-image.png" />
+  <meta property="og:image:width" content="1200" />
+  <meta property="og:image:height" content="630" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content="FluxDown – Free Media Downloader" />
+  <meta name="twitter:description" content="Download videos and audio from YouTube, TikTok, Instagram, Facebook, Vimeo, and more." />
+  <meta name="twitter:image" content="${baseUrl}/og-image.png" />
+</head>
+<body><p>Redirecting...</p><script>window.location.href="/"</script></body>
+</html>`);
+});
+
 export function log(message: string, source = "express") {
   const formattedTime = new Date().toLocaleTimeString("en-US", {
     hour: "numeric",

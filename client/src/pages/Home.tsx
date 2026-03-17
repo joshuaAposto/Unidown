@@ -767,7 +767,7 @@ export default function Home() {
               <Download className="w-3 h-3 text-white" />
             </div>
             <span className="font-semibold text-foreground">FluxDown</span>
-            <span>· Made by Joshua Apostol</span>
+            <span>· Made by Angel Nico P. Igdalino</span>
           </div>
           <Link href="/terms-&-privacy">
             <span className="hover:text-foreground transition-colors cursor-pointer">Terms & Privacy</span>

@@ -91,7 +91,7 @@ export default function TermsAndPrivacy() {
               </div>
             </div>
             <h1 className="text-3xl font-bold tracking-tight mb-2">Terms & Privacy Policy</h1>
-            <p className="text-muted-foreground text-sm">Last updated: March 2026 · Made by Joshua Apostol</p>
+            <p className="text-muted-foreground text-sm">Last updated: March 2026 · Made by Angel Nico P. Igdalino</p>
           </motion.div>
         </div>
       </div>
@@ -214,7 +214,7 @@ export default function TermsAndPrivacy() {
           <p className="text-sm text-muted-foreground">
             If you have any questions about these terms or our privacy practices, feel free to reach out to the developer.
           </p>
-          <p className="text-sm font-medium text-primary">Made by Joshua Apostol</p>
+          <p className="text-sm font-medium text-primary">Made by Angel Nico P. Igdalino</p>
         </div>
       </main>
 
@@ -226,7 +226,7 @@ export default function TermsAndPrivacy() {
               <Download className="w-3 h-3 text-white" />
             </div>
             <span className="font-semibold text-foreground">FluxDown</span>
-            <span>· Made by Joshua Apostol</span>
+            <span>· Made by Angel Nico P. Igdalino</span>
           </div>
           <Link href="/">
             <span className="hover:text-foreground transition-colors cursor-pointer">← Back to Home</span>
