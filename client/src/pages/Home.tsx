@@ -79,12 +79,32 @@ function PlatformBadge({ platform }: { platform: string }) {
 
 // ─── Quality button config ────────────────────────────────────────────────────
 
-const QUALITY_STYLES: Record<string, { icon: React.ReactNode; color: string; border: string; bg: string; hoverBg: string }> = {
-  hd:    { icon: <Film className="w-4 h-4" />,   color: "text-primary", border: "border-primary/30", bg: "bg-primary/8 dark:bg-primary/12", hoverBg: "hover:bg-primary/15 dark:hover:bg-primary/20" },
-  sd:    { icon: <Play className="w-4 h-4" />,   color: "text-blue-400", border: "border-blue-400/30", bg: "bg-blue-400/8 dark:bg-blue-400/12", hoverBg: "hover:bg-blue-400/15 dark:hover:bg-blue-400/20" },
-  audio: { icon: <Volume2 className="w-4 h-4" />, color: "text-violet-500", border: "border-violet-500/30", bg: "bg-violet-500/8 dark:bg-violet-500/12", hoverBg: "hover:bg-violet-500/15 dark:hover:bg-violet-500/20" },
-  best:  { icon: <Download className="w-4 h-4" />, color: "text-emerald-500", border: "border-emerald-500/30", bg: "bg-emerald-500/8 dark:bg-emerald-500/12", hoverBg: "hover:bg-emerald-500/15 dark:hover:bg-emerald-500/20" },
+type QualityStyle = { icon: React.ReactNode; color: string; border: string; bg: string; hoverBg: string };
+
+const QUALITY_STYLE_MAP: Record<string, QualityStyle> = {
+  hd:    { icon: <Film className="w-4 h-4" />,    color: "text-primary",      border: "border-primary/30",      bg: "bg-primary/8 dark:bg-primary/12",      hoverBg: "hover:bg-primary/15 dark:hover:bg-primary/20" },
+  sd:    { icon: <Play className="w-4 h-4" />,    color: "text-blue-400",     border: "border-blue-400/30",     bg: "bg-blue-400/8 dark:bg-blue-400/12",    hoverBg: "hover:bg-blue-400/15 dark:hover:bg-blue-400/20" },
+  audio: { icon: <Volume2 className="w-4 h-4" />, color: "text-violet-500",   border: "border-violet-500/30",   bg: "bg-violet-500/8 dark:bg-violet-500/12",hoverBg: "hover:bg-violet-500/15 dark:hover:bg-violet-500/20" },
+  best:  { icon: <Download className="w-4 h-4" />,color: "text-emerald-500",  border: "border-emerald-500/30",  bg: "bg-emerald-500/8 dark:bg-emerald-500/12", hoverBg: "hover:bg-emerald-500/15 dark:hover:bg-emerald-500/20" },
 };
+
+function getQualityStyle(key: string): QualityStyle {
+  if (QUALITY_STYLE_MAP[key]) return QUALITY_STYLE_MAP[key];
+  if (key.startsWith("audio_")) {
+    return { icon: <Volume2 className="w-4 h-4" />, color: "text-violet-500", border: "border-violet-500/30", bg: "bg-violet-500/8 dark:bg-violet-500/12", hoverBg: "hover:bg-violet-500/15 dark:hover:bg-violet-500/20" };
+  }
+  if (key.startsWith("webm_")) {
+    return { icon: <Film className="w-4 h-4" />, color: "text-amber-500", border: "border-amber-500/30", bg: "bg-amber-500/8 dark:bg-amber-500/12", hoverBg: "hover:bg-amber-500/15 dark:hover:bg-amber-500/20" };
+  }
+  if (key.startsWith("mp4_")) {
+    const heightMatch = key.match(/(\d+)p/);
+    const height = heightMatch ? parseInt(heightMatch[1]) : 0;
+    if (height >= 1440) return { icon: <Film className="w-4 h-4" />, color: "text-emerald-500", border: "border-emerald-500/30", bg: "bg-emerald-500/8 dark:bg-emerald-500/12", hoverBg: "hover:bg-emerald-500/15 dark:hover:bg-emerald-500/20" };
+    if (height >= 720)  return { icon: <Film className="w-4 h-4" />, color: "text-primary",     border: "border-primary/30",      bg: "bg-primary/8 dark:bg-primary/12",       hoverBg: "hover:bg-primary/15 dark:hover:bg-primary/20" };
+    return { icon: <Play className="w-4 h-4" />, color: "text-blue-400", border: "border-blue-400/30", bg: "bg-blue-400/8 dark:bg-blue-400/12", hoverBg: "hover:bg-blue-400/15 dark:hover:bg-blue-400/20" };
+  }
+  return QUALITY_STYLE_MAP.best;
+}
 
 // ─── Welcome Modal ────────────────────────────────────────────────────────────
 
@@ -267,9 +287,9 @@ function AnalysisCard({
           {info.qualities && info.qualities.length > 0 && (
             <div className="space-y-2">
               <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Choose Quality</p>
-              <div className="grid gap-2" style={{ gridTemplateColumns: `repeat(${Math.min(info.qualities.length, 3)}, 1fr)` }}>
+              <div className="grid grid-cols-3 gap-2">
                 {info.qualities.map((q) => {
-                  const style = QUALITY_STYLES[q.key] ?? QUALITY_STYLES.best;
+                  const style = getQualityStyle(q.key);
                   const isDownloading = activeDownload === q.key;
                   return (
                     <button
@@ -278,7 +298,7 @@ function AnalysisCard({
                       onClick={() => handleQualityDownload(q)}
                       disabled={isDownloading}
                       className={`
-                        relative flex flex-col items-center justify-center gap-1 p-3 rounded-xl border
+                        relative flex flex-col items-center justify-center gap-1 p-2.5 rounded-xl border
                         transition-all duration-200 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed
                         ${style.border} ${style.bg} ${style.hoverBg}
                         active:scale-95
@@ -291,8 +311,8 @@ function AnalysisCard({
                           style.icon
                         )}
                       </div>
-                      <span className={`font-bold text-xs ${style.color}`}>{q.label}</span>
-                      <span className="text-[10px] text-muted-foreground leading-none">{q.sublabel}</span>
+                      <span className={`font-bold text-[11px] leading-tight text-center ${style.color}`}>{q.label}</span>
+                      <span className="text-[9px] text-muted-foreground leading-none text-center">{q.sublabel}</span>
                     </button>
                   );
                 })}
@@ -317,17 +337,34 @@ function AnalysisCard({
 
 // ─── Download history card ────────────────────────────────────────────────────
 
-const QUALITY_LABELS: Record<string, { label: string; color: string }> = {
-  hd:    { label: "HD", color: "text-primary bg-primary/10" },
-  sd:    { label: "SD", color: "text-blue-400 bg-blue-400/10" },
+const QUALITY_LABELS_STATIC: Record<string, { label: string; color: string }> = {
+  hd:    { label: "HD",  color: "text-primary bg-primary/10" },
+  sd:    { label: "SD",  color: "text-blue-400 bg-blue-400/10" },
   audio: { label: "MP3", color: "text-violet-500 bg-violet-500/10" },
-  best:  { label: "DL", color: "text-emerald-500 bg-emerald-500/10" },
+  best:  { label: "DL",  color: "text-emerald-500 bg-emerald-500/10" },
 };
+
+function getQualityLabel(key: string): { label: string; color: string } | null {
+  if (!key) return null;
+  if (QUALITY_LABELS_STATIC[key]) return QUALITY_LABELS_STATIC[key];
+  if (key.startsWith("audio_")) return { label: "MP3", color: "text-violet-500 bg-violet-500/10" };
+  if (key.startsWith("webm_")) {
+    const m = key.match(/(\d+)p/);
+    return { label: m ? `${m[1]}p` : "WEBM", color: "text-amber-500 bg-amber-500/10" };
+  }
+  if (key.startsWith("mp4_")) {
+    const m = key.match(/(\d+)p/);
+    const h = m ? parseInt(m[1]) : 0;
+    const color = h >= 1440 ? "text-emerald-500 bg-emerald-500/10" : h >= 720 ? "text-primary bg-primary/10" : "text-blue-400 bg-blue-400/10";
+    return { label: m ? `${m[1]}p` : "MP4", color };
+  }
+  return { label: "DL", color: "text-emerald-500 bg-emerald-500/10" };
+}
 
 function DownloadCard({ download, showUser = false, onDelete }: { download: DownloadType; showUser?: boolean; onDelete?: (id: string) => void }) {
   const timeAgo = formatDistanceToNow(new Date(download.timestamp), { addSuffix: true });
   const cfg = PLATFORM_CONFIG[download.platform] ?? { icon: <Globe className="w-4 h-4" />, color: "text-muted-foreground", bg: "bg-muted" };
-  const qual = download.qualityKey ? QUALITY_LABELS[download.qualityKey] : null;
+  const qual = download.qualityKey ? getQualityLabel(download.qualityKey) : null;
 
   return (
     <motion.div

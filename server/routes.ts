@@ -150,6 +150,10 @@ async function analyzeInstagram(url: string, platform: string): Promise<any> {
 const DEKU_API_KEY = "306bedc73c8e02ea8ab711d370dc245b";
 const DEKU_API_BASE = "https://deku-api.giize.com/download/youtube";
 
+function sanitizeKey(s: string): string {
+  return s.toLowerCase().replace(/[^a-z0-9]/g, "_");
+}
+
 async function dekuYouTubeGetInfo(url: string): Promise<{
   title: string;
   thumbnail: string;
@@ -165,55 +169,69 @@ async function dekuYouTubeGetInfo(url: string): Promise<{
   const result = data.result;
   const medias: any[] = result.medias || [];
 
-  // Best m4a audio stream for merging with video-only formats
-  const audioStreams = medias
+  // Best m4a audio for merging with video-only streams
+  const bestAudio = medias
     .filter((m: any) => m.type === "audio" && m.ext === "m4a")
-    .sort((a: any, b: any) => (b.bitrate || 0) - (a.bitrate || 0));
-  const bestAudio = audioStreams[0];
-
-  // All mp4 video formats — put combined (is_audio: true) before video-only for the same height
-  const mp4Videos = medias
-    .filter((m: any) => m.type === "video" && m.ext === "mp4" && m.height)
-    .sort((a: any, b: any) => {
-      if (b.height !== a.height) return (b.height || 0) - (a.height || 0);
-      return (b.is_audio ? 1 : 0) - (a.is_audio ? 1 : 0); // combined first at same height
-    });
+    .sort((a: any, b: any) => (b.bitrate || 0) - (a.bitrate || 0))[0];
 
   const qualities: QualityOption[] = [];
-  const seenHeights = new Set<number>();
+  const seenVideoKeys = new Set<string>();
 
-  for (const m of mp4Videos) {
-    if (seenHeights.has(m.height)) continue;
-    seenHeights.add(m.height);
+  // ── Video formats: prefer combined (is_audio) over video-only at same height+ext
+  const videoMedias = medias
+    .filter((m: any) => m.type === "video" && m.height && m.ext && m.url)
+    .sort((a: any, b: any) => {
+      if (b.height !== a.height) return (b.height || 0) - (a.height || 0);
+      if (a.ext !== b.ext) return a.ext === "mp4" ? -1 : 1; // mp4 before webm
+      return (b.is_audio ? 1 : 0) - (a.is_audio ? 1 : 0); // combined first
+    });
+
+  for (const m of videoMedias) {
+    const vKey = `${m.ext}_${m.height}p`;
+    if (seenVideoKeys.has(vKey)) continue;
+    seenVideoKeys.add(vKey);
+
+    const labelExt = m.ext.toUpperCase();
+    const qualityKey = sanitizeKey(vKey);
 
     if (m.is_audio) {
-      // Combined video+audio stream — proxy directly, no merge needed
+      // Combined video+audio — proxy directly
       qualities.push({
-        key: `mp4_${m.height}p`,
-        label: `MP4 ${m.height}p`,
-        sublabel: `${m.height}p`,
-        ext: "mp4",
-        formatStr: `deku_direct:${m.url}`,
+        key: qualityKey,
+        label: `${labelExt} ${m.height}p`,
+        sublabel: m.label || `${m.height}p`,
+        ext: m.ext,
+        formatStr: `deku_direct_${m.ext}:${m.url}`,
       });
     } else if (bestAudio) {
-      // Video-only stream — merge with best audio via ffmpeg
+      // Video-only — merge with best audio via ffmpeg → always output mp4
       qualities.push({
-        key: `mp4_${m.height}p`,
-        label: `MP4 ${m.height}p`,
-        sublabel: `${m.height}p`,
+        key: qualityKey,
+        label: `${labelExt} ${m.height}p`,
+        sublabel: m.label || `${m.height}p`,
         ext: "mp4",
         formatStr: `deku_hd:${m.url}|||${bestAudio.url}`,
       });
     }
   }
 
-  if (bestAudio) {
+  // ── Audio formats: all of them
+  const audioMedias = medias
+    .filter((m: any) => m.type === "audio" && m.url)
+    .sort((a: any, b: any) => (b.bitrate || 0) - (a.bitrate || 0));
+
+  const seenAudioKeys = new Set<string>();
+  for (const m of audioMedias) {
+    const aKey = sanitizeKey(m.label || `${m.ext}_audio`);
+    if (seenAudioKeys.has(aKey)) continue;
+    seenAudioKeys.add(aKey);
+
     qualities.push({
-      key: "audio",
-      label: "MP3",
+      key: `audio_${aKey}`,
+      label: m.label || `${(m.ext || "audio").toUpperCase()}`,
       sublabel: "Audio only",
       ext: "mp3",
-      formatStr: `deku_audio:${bestAudio.url}`,
+      formatStr: `deku_audio:${m.url}`,
     });
   }
 
@@ -550,7 +568,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     const cached = downloadFormatCache.get(req.params.id);
     const formatStr = cached?.formatStr || (req.query.format as string) || "best";
     const qualityKey = cached?.qualityKey || (req.query.quality as string) || download.qualityKey || "best";
-    const isAudio = qualityKey === "audio";
+    const isAudio = qualityKey === "audio" || qualityKey.startsWith("audio_") || formatStr.startsWith("deku_audio:");
     const safeTitle = (download.title || "download")
       .replace(/[\r\n\t]/g, " ")                  // strip newlines
       .replace(/[^\x20-\x7E]/g, "")               // strip non-ASCII (®, curly quotes, etc.)
@@ -674,16 +692,22 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       return;
     }
 
-    // ─── Deku YouTube: SD (combined stream, direct proxy) ───────────────────
-    if (formatStr.startsWith("deku_direct:")) {
-      const directUrl = formatStr.slice("deku_direct:".length);
+    // ─── Deku YouTube: combined stream direct proxy (mp4 or webm) ───────────
+    if (formatStr.startsWith("deku_direct_")) {
+      const colonIdx = formatStr.indexOf(":");
+      const extPart = formatStr.slice("deku_direct_".length, colonIdx); // "mp4" or "webm"
+      const directUrl = formatStr.slice(colonIdx + 1);
+      const isWebm = extPart === "webm";
+      const contentType = isWebm ? "video/webm" : "video/mp4";
+      const fileExt = isWebm ? "webm" : "mp4";
+      res.setHeader("Content-Type", contentType);
+      res.setHeader("Content-Disposition", `attachment; filename="${safeTitle}.${fileExt}"`);
       try {
         const fileRes = await axios.get(directUrl, {
           responseType: "stream",
           timeout: 60000,
           headers: { "User-Agent": AXIOS_UA },
         });
-        res.setHeader("Content-Type", "video/mp4");
         if (fileRes.headers["content-length"]) res.setHeader("Content-Length", fileRes.headers["content-length"]);
         res.on("error", () => {});
         fileRes.data.pipe(res);
