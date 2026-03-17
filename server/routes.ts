@@ -165,41 +165,46 @@ async function dekuYouTubeGetInfo(url: string): Promise<{
   const result = data.result;
   const medias: any[] = result.medias || [];
 
-  const combinedMp4 = medias
-    .filter((m: any) => m.is_audio === true && m.ext === "mp4" && m.height)
-    .sort((a: any, b: any) => (b.height || 0) - (a.height || 0));
-
-  const videoOnlyMp4 = medias
-    .filter((m: any) => !m.audioQuality && m.type === "video" && m.ext === "mp4" && m.height)
-    .sort((a: any, b: any) => (b.height || 0) - (a.height || 0));
-
+  // Best m4a audio stream for merging with video-only formats
   const audioStreams = medias
     .filter((m: any) => m.type === "audio" && m.ext === "m4a")
     .sort((a: any, b: any) => (b.bitrate || 0) - (a.bitrate || 0));
-
   const bestAudio = audioStreams[0];
+
+  // All mp4 video formats — put combined (is_audio: true) before video-only for the same height
+  const mp4Videos = medias
+    .filter((m: any) => m.type === "video" && m.ext === "mp4" && m.height)
+    .sort((a: any, b: any) => {
+      if (b.height !== a.height) return (b.height || 0) - (a.height || 0);
+      return (b.is_audio ? 1 : 0) - (a.is_audio ? 1 : 0); // combined first at same height
+    });
+
   const qualities: QualityOption[] = [];
+  const seenHeights = new Set<number>();
 
-  const hdVideo = videoOnlyMp4.find((m: any) => m.height >= 720 && m.height <= 1080);
-  if (hdVideo && bestAudio) {
-    qualities.push({
-      key: "hd",
-      label: "HD MP4",
-      sublabel: `${hdVideo.height}p`,
-      ext: "mp4",
-      formatStr: `deku_hd:${hdVideo.url}|||${bestAudio.url}`,
-    });
-  }
+  for (const m of mp4Videos) {
+    if (seenHeights.has(m.height)) continue;
+    seenHeights.add(m.height);
 
-  const sdCombined = combinedMp4[0];
-  if (sdCombined) {
-    qualities.push({
-      key: "sd",
-      label: "SD MP4",
-      sublabel: `${sdCombined.height}p`,
-      ext: "mp4",
-      formatStr: `deku_direct:${sdCombined.url}`,
-    });
+    if (m.is_audio) {
+      // Combined video+audio stream — proxy directly, no merge needed
+      qualities.push({
+        key: `mp4_${m.height}p`,
+        label: `MP4 ${m.height}p`,
+        sublabel: `${m.height}p`,
+        ext: "mp4",
+        formatStr: `deku_direct:${m.url}`,
+      });
+    } else if (bestAudio) {
+      // Video-only stream — merge with best audio via ffmpeg
+      qualities.push({
+        key: `mp4_${m.height}p`,
+        label: `MP4 ${m.height}p`,
+        sublabel: `${m.height}p`,
+        ext: "mp4",
+        formatStr: `deku_hd:${m.url}|||${bestAudio.url}`,
+      });
+    }
   }
 
   if (bestAudio) {
