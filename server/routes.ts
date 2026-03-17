@@ -161,6 +161,8 @@ async function dekuYouTubeGetInfo(url: string): Promise<{
   author: string;
   qualities: QualityOption[];
 }> {
+  // Deku API is used for metadata only (title, thumbnail, available quality list).
+  // Actual downloads use yt-dlp so URLs are fetched on our server's IP (avoids 403 on Google CDN).
   const apiUrl = `${DEKU_API_BASE}?url=${encodeURIComponent(url)}&apikey=${DEKU_API_KEY}`;
   const res = await axios.get(apiUrl, { timeout: 30000 });
   const data = res.data;
@@ -169,69 +171,49 @@ async function dekuYouTubeGetInfo(url: string): Promise<{
   const result = data.result;
   const medias: any[] = result.medias || [];
 
-  // Best m4a audio for merging with video-only streams
-  const bestAudio = medias
-    .filter((m: any) => m.type === "audio" && m.ext === "m4a")
-    .sort((a: any, b: any) => (b.bitrate || 0) - (a.bitrate || 0))[0];
+  // Collect available heights per ext from the API response
+  const mp4Heights = [...new Set(
+    medias.filter((m: any) => m.type === "video" && m.ext === "mp4" && m.height).map((m: any) => m.height as number)
+  )].sort((a, b) => b - a);
+
+  const webmHeights = [...new Set(
+    medias.filter((m: any) => m.type === "video" && m.ext === "webm" && m.height).map((m: any) => m.height as number)
+  )].sort((a, b) => b - a);
+
+  const hasAudio = medias.some((m: any) => m.type === "audio");
 
   const qualities: QualityOption[] = [];
-  const seenVideoKeys = new Set<string>();
 
-  // ── Video formats: prefer combined (is_audio) over video-only at same height+ext
-  const videoMedias = medias
-    .filter((m: any) => m.type === "video" && m.height && m.ext && m.url)
-    .sort((a: any, b: any) => {
-      if (b.height !== a.height) return (b.height || 0) - (a.height || 0);
-      if (a.ext !== b.ext) return a.ext === "mp4" ? -1 : 1; // mp4 before webm
-      return (b.is_audio ? 1 : 0) - (a.is_audio ? 1 : 0); // combined first
+  // ── MP4 video qualities → yt-dlp format strings (runs on our server's IP)
+  for (const h of mp4Heights) {
+    qualities.push({
+      key: `mp4_${h}p`,
+      label: `MP4 ${h}p`,
+      sublabel: `${h}p`,
+      ext: "mp4",
+      formatStr: `bestvideo[height=${h}][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<=${h}][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<=${h}]+bestaudio/best[height<=${h}]/best`,
     });
-
-  for (const m of videoMedias) {
-    const vKey = `${m.ext}_${m.height}p`;
-    if (seenVideoKeys.has(vKey)) continue;
-    seenVideoKeys.add(vKey);
-
-    const labelExt = m.ext.toUpperCase();
-    const qualityKey = sanitizeKey(vKey);
-
-    if (m.is_audio) {
-      // Combined video+audio — proxy directly
-      qualities.push({
-        key: qualityKey,
-        label: `${labelExt} ${m.height}p`,
-        sublabel: m.label || `${m.height}p`,
-        ext: m.ext,
-        formatStr: `deku_direct_${m.ext}:${m.url}`,
-      });
-    } else if (bestAudio) {
-      // Video-only — merge with best audio via ffmpeg → always output mp4
-      qualities.push({
-        key: qualityKey,
-        label: `${labelExt} ${m.height}p`,
-        sublabel: m.label || `${m.height}p`,
-        ext: "mp4",
-        formatStr: `deku_hd:${m.url}|||${bestAudio.url}`,
-      });
-    }
   }
 
-  // ── Audio formats: all of them
-  const audioMedias = medias
-    .filter((m: any) => m.type === "audio" && m.url)
-    .sort((a: any, b: any) => (b.bitrate || 0) - (a.bitrate || 0));
-
-  const seenAudioKeys = new Set<string>();
-  for (const m of audioMedias) {
-    const aKey = sanitizeKey(m.label || `${m.ext}_audio`);
-    if (seenAudioKeys.has(aKey)) continue;
-    seenAudioKeys.add(aKey);
-
+  // ── WEBM video qualities
+  for (const h of webmHeights) {
     qualities.push({
-      key: `audio_${aKey}`,
-      label: m.label || `${(m.ext || "audio").toUpperCase()}`,
+      key: `webm_${h}p`,
+      label: `WEBM ${h}p`,
+      sublabel: `${h}p`,
+      ext: "mp4",
+      formatStr: `bestvideo[height=${h}][ext=webm]+bestaudio[ext=m4a]/bestvideo[height<=${h}][ext=webm]+bestaudio[ext=m4a]/bestvideo[height<=${h}]+bestaudio/best`,
+    });
+  }
+
+  // ── Audio-only quality
+  if (hasAudio) {
+    qualities.push({
+      key: "audio",
+      label: "MP3",
       sublabel: "Audio only",
       ext: "mp3",
-      formatStr: `deku_audio:${m.url}`,
+      formatStr: "bestaudio/best",
     });
   }
 
