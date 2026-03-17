@@ -11,7 +11,7 @@ A universal link downloader web app that lets users download YouTube videos, dir
 
 ## Key Features
 - User registration by name + auto-detected IP + localStorage deviceId
-- URL analysis: YouTube metadata (ytdl-core) + direct file HTTP HEAD
+- URL analysis: YouTube metadata (yt-dlp-wrap) + direct file HTTP HEAD
 - Proxied file downloads for both YouTube and direct URLs
 - Global recent downloads feed (polls every 8 seconds)
 - Per-user download history
@@ -53,7 +53,7 @@ data/
 - Background (dark): Deep navy `hsl(222 39% 8%)`
 
 ## Dependencies Added
-- `ytdl-core` — YouTube video info and streaming
+- `yt-dlp-wrap` — YouTube video info and streaming
 - `axios` — HTTP proxy for direct file downloads
 
 ## User Flow
