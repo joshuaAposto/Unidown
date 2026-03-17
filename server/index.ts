@@ -6,6 +6,11 @@ import { createServer } from "http";
 const app = express();
 const httpServer = createServer(app);
 
+process.on("uncaughtException", (err: any) => {
+  if (err.code === "EPIPE" || err.code === "ECONNRESET") return;
+  console.error("Uncaught exception:", err);
+});
+
 declare module "http" {
   interface IncomingMessage {
     rawBody: unknown;

@@ -503,6 +503,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           headers: { "User-Agent": AXIOS_UA, "Referer": "https://www.tiktok.com/" },
         });
         if (fileRes.headers["content-length"]) res.setHeader("Content-Length", fileRes.headers["content-length"]);
+        res.on("error", () => {});
         fileRes.data.pipe(res);
       } catch (err: any) {
         console.error("TikTok download error:", err.message);
@@ -535,6 +536,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
             "-i", "pipe:0", "-f", "mp3", "-b:a", "192k", "-vn", "-write_xing", "0", "pipe:1",
           ], { stdio: ["pipe", "pipe", "pipe"] });
           videoRes.data.pipe(ffProc.stdin);
+          res.on("error", () => {});
           ffProc.stdout.pipe(res);
           ffProc.stderr.on("data", () => {});
           ffProc.on("error", (e) => { console.error("ig ffmpeg audio:", e.message); if (!res.headersSent) res.status(500).end(); });
@@ -557,6 +559,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
             },
           });
           if (fileRes.headers["content-length"]) res.setHeader("Content-Length", fileRes.headers["content-length"]);
+          res.on("error", () => {});
           fileRes.data.pipe(res);
         } catch (err: any) {
           if (!res.headersSent) res.status(500).json({ error: "Instagram download failed: " + err.message });
@@ -580,6 +583,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           headers: { "User-Agent": AXIOS_UA },
         });
         if (imgRes.headers["content-length"]) res.setHeader("Content-Length", imgRes.headers["content-length"]);
+        res.on("error", () => {});
         imgRes.data.pipe(res);
       } catch (err: any) {
         if (!res.headersSent) res.status(500).json({ error: "Image download failed: " + err.message });
@@ -612,8 +616,9 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           }
           if (!existsSync(tmpFile)) { if (!res.headersSent) res.status(500).json({ error: "Output file not found" }); return; }
           const stream = createReadStream(tmpFile);
-          stream.pipe(res);
+          res.on("error", () => {});
           stream.on("error", (e) => { console.error("Stream error:", e); });
+          stream.pipe(res);
           res.on("finish", () => { unlink(tmpFile, () => {}); });
           res.on("close", () => { unlink(tmpFile, () => {}); });
         });
@@ -630,6 +635,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         const cl = fileRes.headers["content-length"];
         res.setHeader("Content-Type", ct);
         if (cl) res.setHeader("Content-Length", cl);
+        res.on("error", () => {});
         fileRes.data.pipe(res);
       } catch (err: any) {
         if (!res.headersSent) res.status(500).json({ error: "Download failed: " + err.message });
@@ -666,6 +672,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       ], { stdio: ["pipe", "pipe", "pipe"] });
 
       ytProc.stdout.pipe(ffProc.stdin);
+      res.on("error", () => {});
       ffProc.stdout.pipe(res);
 
       let ytStderr = "", ffStderr = "";
@@ -716,8 +723,9 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           return;
         }
         const stream = createReadStream(tmpFile);
-        stream.pipe(res);
+        res.on("error", () => {});
         stream.on("error", (err) => { console.error("Stream error:", err); });
+        stream.pipe(res);
         res.on("finish", () => { unlink(tmpFile, () => {}); });
         res.on("close", () => { unlink(tmpFile, () => {}); });
       });
@@ -733,6 +741,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         "-o", "-",
       ];
       const proc = spawn(YTDLP_BIN, args, { stdio: ["ignore", "pipe", "pipe"] });
+      res.on("error", () => {});
       proc.stdout.pipe(res);
 
       let stderrBuf = "";
