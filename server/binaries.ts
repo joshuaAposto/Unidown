@@ -10,7 +10,11 @@ const _require = createRequire(import.meta.url);
 // ffmpeg-static bundles a portable ffmpeg binary that works on any platform
 export const FFMPEG_BIN: string = _require("ffmpeg-static");
 
-const BIN_DIR = resolve(process.cwd(), "bin");
+// Use /tmp on production (e.g. Render) since the app directory is read-only;
+// Render sets RENDER=true automatically; also check NODE_ENV as a fallback.
+const BIN_DIR = (process.env.RENDER || process.env.NODE_ENV === "production")
+  ? "/tmp/ytdlp-bin"
+  : resolve(process.cwd(), "bin");
 const YTDLP_PATH = resolve(BIN_DIR, "yt-dlp");
 
 function getYtdlpUrl(): string {
