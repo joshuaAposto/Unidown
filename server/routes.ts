@@ -173,16 +173,21 @@ async function resolveRedirect(url: string): Promise<string> {
 }
 
 async function ytdlpGetInfo(url: string): Promise<any> {
+  const isYouTube = /youtube\.com|youtu\.be/i.test(url);
+  const args = [
+    "--dump-json",
+    "--no-playlist",
+    "--no-warnings",
+    "--user-agent", AXIOS_UA,
+  ];
+  if (isYouTube) {
+    args.push("--extractor-args", "youtube:player_client=tv_embedded,web");
+  }
+  args.push(url);
   const { stdout } = await execFileAsync(
     YTDLP_BIN,
-    [
-      "--dump-json",
-      "--no-playlist",
-      "--no-warnings",
-      "--user-agent", AXIOS_UA,
-      url,
-    ],
-    { timeout: 30000, maxBuffer: 10 * 1024 * 1024 }
+    args,
+    { timeout: 45000, maxBuffer: 10 * 1024 * 1024 }
   );
   return JSON.parse(stdout.trim());
 }
@@ -374,6 +379,39 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           resolvedUrl: resolvedUrl !== url ? resolvedUrl : undefined,
         });
       } catch (e: any) {
+        // yt-dlp failed — for YouTube/known video platforms still use yt-dlp for download
+        const isYouTubeUrl = /youtube\.com|youtu\.be/i.test(url);
+        if (isYouTubeUrl) {
+          console.error("yt-dlp info failed for YouTube, using default qualities:", e.message);
+          return res.json({
+            title: "YouTube Video",
+            platform: "YouTube",
+            downloadable: true,
+            qualities: [
+              {
+                key: "hd",
+                label: "HD MP4",
+                sublabel: "720p–1080p",
+                ext: "mp4",
+                formatStr: "bestvideo[ext=mp4][height<=1080]+bestaudio[ext=m4a]/bestvideo[height<=1080]+bestaudio/best[height<=1080]/best",
+              },
+              {
+                key: "sd",
+                label: "SD MP4",
+                sublabel: "360p–480p",
+                ext: "mp4",
+                formatStr: "bestvideo[ext=mp4][height<=480]+bestaudio[ext=m4a]/bestvideo[height<=480]+bestaudio/best[height<=480]/worst",
+              },
+              {
+                key: "audio",
+                label: "MP3",
+                sublabel: "Audio only",
+                ext: "mp3",
+                formatStr: "bestaudio/best",
+              },
+            ],
+          });
+        }
         // yt-dlp failed — try direct file fallback
       }
     }
@@ -545,6 +583,26 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
     // ─── Direct file proxy ──────────────────────────────────────────────────
     if (formatStr === "direct") {
+      // YouTube URLs can't be directly proxied — use yt-dlp instead
+      if (/youtube\.com|youtu\.be/i.test(url)) {
+        const ytArgs = [
+          url, "--no-playlist", "--no-warnings",
+          "--user-agent", AXIOS_UA,
+          "--extractor-args", "youtube:player_client=tv_embedded,web",
+          "-f", "bestvideo[ext=mp4][height<=1080]+bestaudio[ext=m4a]/bestvideo[height<=1080]+bestaudio/best[height<=1080]/best",
+          "--merge-output-format", "mp4",
+          "--ffmpeg-location", FFMPEG_BIN,
+          "-o", "-",
+        ];
+        const ytProc = spawn(YTDLP_BIN, ytArgs, { stdio: ["ignore", "pipe", "pipe"] });
+        ytProc.stdout.pipe(res);
+        let stderrBuf = "";
+        ytProc.stderr.on("data", (c: Buffer) => { stderrBuf += c.toString(); });
+        ytProc.on("error", (err) => { console.error("yt-dlp spawn error:", err); if (!res.headersSent) res.status(500).json({ error: "Spawn failed" }); });
+        ytProc.on("close", (code) => { if (code !== 0) console.error("yt-dlp exit", code, stderrBuf.slice(-500)); });
+        req.on("close", () => ytProc.kill("SIGTERM"));
+        return;
+      }
       try {
         const fileRes = await axios.get(url, {
           responseType: "stream",
@@ -570,11 +628,15 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       streamUrl = await resolveRedirect(url);
     }
 
+    const isYouTubeStream = /youtube\.com|youtu\.be/i.test(streamUrl);
     const args: string[] = [
       streamUrl, "--no-playlist", "--no-warnings",
       "--user-agent", AXIOS_UA,
       "-o", "-",
     ];
+    if (isYouTubeStream) {
+      args.splice(args.length - 1, 0, "--extractor-args", "youtube:player_client=tv_embedded,web");
+    }
 
     if (isAudio) {
       // Download best audio and pipe through ffmpeg to convert to mp3
