@@ -7,9 +7,6 @@ import axios from "axios";
 import { resolve } from "path";
 import { execFile, spawn } from "child_process";
 import { promisify } from "util";
-import { tmpdir } from "os";
-import { createReadStream, unlink, existsSync } from "fs";
-import { randomUUID } from "crypto";
 import { ensureYtdlp, FFMPEG_BIN } from "./binaries";
 
 const execFileAsync = promisify(execFile);
@@ -138,73 +135,41 @@ async function analyzeInstagram(url: string, platform: string): Promise<any> {
   return { title, platform, thumbnail, downloadable: true, qualities };
 }
 
-const DEKU_API_KEY = "306bedc73c8e02ea8ab711d370dc245b";
-const DEKU_API_BASE = "https://deku-api.giize.com/download/youtube";
+const CC_YT_API = "https://cc-project-apis-jonell-magallanes.onrender.com/api/yt?url=";
 
-async function dekuYouTubeGetInfo(url: string): Promise<{
+async function ccYouTubeGetInfo(url: string): Promise<{
   title: string;
   thumbnail: string;
-  duration: number;
   author: string;
   qualities: QualityOption[];
 }> {
-  const apiUrl = `${DEKU_API_BASE}?url=${encodeURIComponent(url)}&apikey=${DEKU_API_KEY}`;
+  const apiUrl = `${CC_YT_API}${encodeURIComponent(url)}`;
   const res = await axios.get(apiUrl, { timeout: 30000 });
-  const data = res.data;
-  if (!data.status || !data.result?.success) throw new Error("Deku API returned failure");
+  const body = res.data;
+  const data = body?.url?.data;
+  if (!body?.url?.status || !data?.video) throw new Error("CC YT API returned failure or no video");
 
-  const result = data.result;
-  const medias: any[] = result.medias || [];
+  const videoUrl: string = data.video;
+  const thumbnail: string = data.picture || "";
+  const author: string = data.author?.name || "";
 
-  const mp4Heights = [...new Set(
-    medias.filter((m: any) => m.type === "video" && m.ext === "mp4" && m.height).map((m: any) => m.height as number)
-  )].sort((a, b) => b - a);
+  let title = "YouTube Video";
+  try {
+    const fnMatch = videoUrl.match(/[?&]fn=([^&]+)/);
+    if (fnMatch) title = decodeURIComponent(fnMatch[1]);
+  } catch {}
 
-  const webmHeights = [...new Set(
-    medias.filter((m: any) => m.type === "video" && m.ext === "webm" && m.height).map((m: any) => m.height as number)
-  )].sort((a, b) => b - a);
-
-  const hasAudio = medias.some((m: any) => m.type === "audio");
-
-  const qualities: QualityOption[] = [];
-
-  for (const h of mp4Heights) {
-    qualities.push({
-      key: `mp4_${h}p`,
-      label: `MP4 ${h}p`,
-      sublabel: `${h}p`,
+  const qualities: QualityOption[] = [
+    {
+      key: "video",
+      label: "MP4",
+      sublabel: "360p",
       ext: "mp4",
-      formatStr: `bestvideo[height=${h}][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<=${h}][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<=${h}]+bestaudio/best[height<=${h}]/best`,
-    });
-  }
+      formatStr: `yt_direct:${videoUrl}`,
+    },
+  ];
 
-  for (const h of webmHeights) {
-    qualities.push({
-      key: `webm_${h}p`,
-      label: `WEBM ${h}p`,
-      sublabel: `${h}p`,
-      ext: "mp4",
-      formatStr: `bestvideo[height=${h}][ext=webm]+bestaudio[ext=m4a]/bestvideo[height<=${h}][ext=webm]+bestaudio[ext=m4a]/bestvideo[height<=${h}]+bestaudio/best`,
-    });
-  }
-
-  if (hasAudio) {
-    qualities.push({
-      key: "audio",
-      label: "MP3",
-      sublabel: "Audio only",
-      ext: "mp3",
-      formatStr: "bestaudio/best",
-    });
-  }
-
-  return {
-    title: result.title || "YouTube Video",
-    thumbnail: result.thumbnail || "",
-    duration: result.duration || 0,
-    author: result.author || "",
-    qualities,
-  };
+  return { title, thumbnail, author, qualities };
 }
 
 async function resolveRedirect(url: string): Promise<string> {
@@ -233,11 +198,6 @@ async function resolveRedirect(url: string): Promise<string> {
       return url;
     }
   }
-}
-
-function extractYouTubeId(url: string): string | null {
-  const m = url.match(/(?:youtu\.be\/|youtube\.com\/(?:watch\?v=|shorts\/|embed\/|v\/))([A-Za-z0-9_-]{11})/);
-  return m ? m[1] : null;
 }
 
 async function ytdlpGetInfo(url: string): Promise<any> {
@@ -413,33 +373,18 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     const isYouTubeUrl = /youtube\.com|youtu\.be/i.test(url);
     if (isYouTubeUrl) {
       try {
-        const info = await dekuYouTubeGetInfo(url);
+        const info = await ccYouTubeGetInfo(url);
         return res.json({
           title: info.title,
           platform: "YouTube",
           thumbnail: info.thumbnail,
           downloadable: true,
-          duration: info.duration,
           uploader: info.author || undefined,
-          qualities: info.qualities.length > 0 ? info.qualities : [
-            { key: "sd", label: "SD MP4", sublabel: "360p", ext: "mp4", formatStr: "best" },
-          ],
+          qualities: info.qualities,
         });
       } catch (e: any) {
-        console.error("Deku API failed for YouTube, falling back to yt-dlp:", e.message);
-        const ytId = extractYouTubeId(url);
-        const thumbnail = ytId ? `https://img.youtube.com/vi/${ytId}/maxresdefault.jpg` : undefined;
-        return res.json({
-          title: "YouTube Video",
-          platform: "YouTube",
-          thumbnail,
-          downloadable: true,
-          qualities: [
-            { key: "hd", label: "HD MP4", sublabel: "720p–1080p", ext: "mp4", formatStr: "bestvideo[ext=mp4][height<=1080]+bestaudio[ext=m4a]/best[height<=1080]/best" },
-            { key: "sd", label: "SD MP4", sublabel: "360p–480p", ext: "mp4", formatStr: "bestvideo[ext=mp4][height<=480]+bestaudio[ext=m4a]/best[height<=480]/worst" },
-            { key: "audio", label: "MP3", sublabel: "Audio only", ext: "mp3", formatStr: "bestaudio/best" },
-          ],
-        });
+        console.error("CC YT API failed:", e.message);
+        return res.status(500).json({ error: "Could not fetch YouTube video. Try again later." });
       }
     }
 
@@ -626,38 +571,25 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       return;
     }
 
-    if (formatStr === "direct") {
-      if (/youtube\.com|youtu\.be/i.test(url)) {
-        const tmpFile = resolve(tmpdir(), `ytdl-${randomUUID()}.mp4`);
-        const ytArgs = [
-          url, "--no-playlist", "--no-warnings",
-          "--user-agent", AXIOS_UA,
-          "-f", "bestvideo[ext=mp4][height<=1080]+bestaudio[ext=m4a]/bestvideo[height<=1080]+bestaudio/best[height<=1080]/best",
-          "--merge-output-format", "mp4",
-          "--ffmpeg-location", FFMPEG_BIN,
-          "-o", tmpFile,
-        ];
-        const ytProc = spawn(YTDLP_BIN, ytArgs, { stdio: ["ignore", "pipe", "pipe"] });
-        let stderrBuf = "";
-        ytProc.stderr.on("data", (c: Buffer) => { stderrBuf += c.toString(); });
-        ytProc.on("error", (err) => { console.error("yt-dlp spawn error:", err); if (!res.headersSent) res.status(500).json({ error: "Spawn failed" }); });
-        ytProc.on("close", (code) => {
-          if (code !== 0) {
-            console.error("yt-dlp exit", code, stderrBuf.slice(-500));
-            if (!res.headersSent) res.status(500).json({ error: "Download failed — video may be restricted or unavailable." });
-            return;
-          }
-          if (!existsSync(tmpFile)) { if (!res.headersSent) res.status(500).json({ error: "Output file not found" }); return; }
-          const stream = createReadStream(tmpFile);
-          res.on("error", () => {});
-          stream.on("error", (e) => { console.error("Stream error:", e); });
-          stream.pipe(res);
-          res.on("finish", () => { unlink(tmpFile, () => {}); });
-          res.on("close", () => { unlink(tmpFile, () => {}); });
+    if (formatStr.startsWith("yt_direct:")) {
+      const ytVideoUrl = formatStr.slice("yt_direct:".length);
+      try {
+        const fileRes = await axios.get(ytVideoUrl, {
+          responseType: "stream",
+          timeout: 120000,
+          headers: { "User-Agent": AXIOS_UA },
         });
-        req.on("close", () => { ytProc.kill("SIGTERM"); unlink(tmpFile, () => {}); });
-        return;
+        if (fileRes.headers["content-length"]) res.setHeader("Content-Length", fileRes.headers["content-length"]);
+        res.on("error", () => {});
+        fileRes.data.pipe(res);
+      } catch (err: any) {
+        console.error("YT direct download error:", err.message);
+        if (!res.headersSent) res.status(500).json({ error: "YouTube download failed: " + err.message });
       }
+      return;
+    }
+
+    if (formatStr === "direct") {
       try {
         const fileRes = await axios.get(url, {
           responseType: "stream",
@@ -681,8 +613,6 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     if (isShortStreamLink) {
       streamUrl = await resolveRedirect(url);
     }
-
-    const isYouTubeStream = /youtube\.com|youtu\.be/i.test(streamUrl);
 
     if (isAudio) {
       const args: string[] = [
@@ -724,41 +654,6 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         if (code !== 0) console.error("ffmpeg exit", code, ffStderr.slice(-300));
       });
       req.on("close", () => { ytProc.kill("SIGTERM"); ffProc.kill("SIGTERM"); });
-    } else if (isYouTubeStream) {
-      const tmpFile = resolve(tmpdir(), `ytdl-${randomUUID()}.mp4`);
-      const args: string[] = [
-        streamUrl, "--no-playlist", "--no-warnings",
-        "--user-agent", AXIOS_UA,
-        "-f", formatStr,
-        "--merge-output-format", "mp4",
-        "--ffmpeg-location", FFMPEG_BIN,
-        "-o", tmpFile,
-      ];
-      const proc = spawn(YTDLP_BIN, args, { stdio: ["ignore", "pipe", "pipe"] });
-      let stderrBuf = "";
-      proc.stderr.on("data", (c: Buffer) => { stderrBuf += c.toString(); });
-      proc.on("error", (err) => {
-        console.error("yt-dlp spawn error:", err);
-        if (!res.headersSent) res.status(500).json({ error: "Spawn failed" });
-      });
-      proc.on("close", (code) => {
-        if (code !== 0) {
-          console.error("yt-dlp exit", code, stderrBuf.slice(-500));
-          if (!res.headersSent) res.status(500).json({ error: "Download failed — video may be restricted or unavailable." });
-          return;
-        }
-        if (!existsSync(tmpFile)) {
-          if (!res.headersSent) res.status(500).json({ error: "Output file not found after download" });
-          return;
-        }
-        const stream = createReadStream(tmpFile);
-        res.on("error", () => {});
-        stream.on("error", (err) => { console.error("Stream error:", err); });
-        stream.pipe(res);
-        res.on("finish", () => { unlink(tmpFile, () => {}); });
-        res.on("close", () => { unlink(tmpFile, () => {}); });
-      });
-      req.on("close", () => { proc.kill("SIGTERM"); unlink(tmpFile, () => {}); });
     } else {
       const args: string[] = [
         streamUrl, "--no-playlist", "--no-warnings",

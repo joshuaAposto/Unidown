@@ -53,8 +53,12 @@ data/
 - Background (dark): Deep navy `hsl(222 39% 8%)`
 
 ## Dependencies Added
-- `yt-dlp-wrap` — YouTube video info and streaming
-- `axios` — HTTP proxy for direct file downloads
+- `axios` — HTTP proxy for direct file downloads and YouTube video proxying
+
+## YouTube API
+YouTube videos are fetched via `https://cc-project-apis-jonell-magallanes.onrender.com/api/yt?url=`
+Response fields used: `url.data.picture` (thumbnail), `url.data.video` (download URL), `url.data.author.name` (uploader).
+Only one quality option is shown (whatever the API returns).
 
 ## User Flow
 1. First visit → WelcomeModal asks for name → stored in localStorage
