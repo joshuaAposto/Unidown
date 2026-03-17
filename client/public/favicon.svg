@@ -1,27 +1,24 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
   <defs>
     <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#3b82f6"/>
-      <stop offset="100%" stop-color="#1d4ed8"/>
+      <stop offset="0%" stop-color="#1e293b"/>
+      <stop offset="100%" stop-color="#0f172a"/>
     </linearGradient>
-    <linearGradient id="shine" x1="0%" y1="0%" x2="0%" y2="100%">
-      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.15"/>
-      <stop offset="100%" stop-color="#ffffff" stop-opacity="0"/>
+    <linearGradient id="glow" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#60a5fa"/>
+      <stop offset="100%" stop-color="#3b82f6"/>
     </linearGradient>
   </defs>
 
-  <!-- Background rounded square -->
-  <rect width="64" height="64" rx="14" fill="url(#bg)"/>
+  <!-- Background -->
+  <rect width="64" height="64" rx="13" fill="url(#bg)"/>
 
-  <!-- Shine overlay -->
-  <rect width="64" height="32" rx="14" fill="url(#shine)"/>
+  <!-- "F" letter -->
+  <rect x="14" y="13" width="22" height="5.5" rx="2" fill="url(#glow)"/>
+  <rect x="14" y="13" width="5.5" height="26" rx="2" fill="url(#glow)"/>
+  <rect x="14" y="27" width="17" height="5" rx="2" fill="url(#glow)"/>
 
-  <!-- Down arrow shaft -->
-  <rect x="28" y="12" width="8" height="24" rx="4" fill="white"/>
-
-  <!-- Arrowhead -->
-  <path d="M16 34 L32 50 L48 34" fill="none" stroke="white" stroke-width="7.5" stroke-linecap="round" stroke-linejoin="round"/>
-
-  <!-- Base line -->
-  <rect x="14" y="52" width="36" height="6" rx="3" fill="white" opacity="0.85"/>
+  <!-- Down arrow (dpwn) -->
+  <rect x="38" y="26" width="5" height="14" rx="2.5" fill="#60a5fa"/>
+  <path d="M33.5 40.5 L40.5 49 L47.5 40.5" stroke="#60a5fa" stroke-width="5" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
 </svg>
