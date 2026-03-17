@@ -7,6 +7,9 @@ import axios from "axios";
 import { resolve } from "path";
 import { execFile, spawn } from "child_process";
 import { promisify } from "util";
+import { tmpdir } from "os";
+import { createReadStream, unlink, existsSync } from "fs";
+import { randomUUID } from "crypto";
 
 const execFileAsync = promisify(execFile);
 const YTDLP_BIN = resolve(process.cwd(), "bin/yt-dlp");
@@ -172,21 +175,21 @@ async function resolveRedirect(url: string): Promise<string> {
   }
 }
 
+function extractYouTubeId(url: string): string | null {
+  const m = url.match(/(?:youtu\.be\/|youtube\.com\/(?:watch\?v=|shorts\/|embed\/|v\/))([A-Za-z0-9_-]{11})/);
+  return m ? m[1] : null;
+}
+
 async function ytdlpGetInfo(url: string): Promise<any> {
-  const isYouTube = /youtube\.com|youtu\.be/i.test(url);
-  const args = [
-    "--dump-json",
-    "--no-playlist",
-    "--no-warnings",
-    "--user-agent", AXIOS_UA,
-  ];
-  if (isYouTube) {
-    args.push("--extractor-args", "youtube:player_client=tv_embedded,web");
-  }
-  args.push(url);
   const { stdout } = await execFileAsync(
     YTDLP_BIN,
-    args,
+    [
+      "--dump-json",
+      "--no-playlist",
+      "--no-warnings",
+      "--user-agent", AXIOS_UA,
+      url,
+    ],
     { timeout: 45000, maxBuffer: 10 * 1024 * 1024 }
   );
   return JSON.parse(stdout.trim());
@@ -383,9 +386,12 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         const isYouTubeUrl = /youtube\.com|youtu\.be/i.test(url);
         if (isYouTubeUrl) {
           console.error("yt-dlp info failed for YouTube, using default qualities:", e.message);
+          const ytId = extractYouTubeId(url);
+          const thumbnail = ytId ? `https://img.youtube.com/vi/${ytId}/maxresdefault.jpg` : undefined;
           return res.json({
             title: "YouTube Video",
             platform: "YouTube",
+            thumbnail,
             downloadable: true,
             qualities: [
               {
@@ -583,24 +589,35 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
     // ─── Direct file proxy ──────────────────────────────────────────────────
     if (formatStr === "direct") {
-      // YouTube URLs can't be directly proxied — use yt-dlp instead
+      // YouTube URLs can't be directly proxied — use yt-dlp with temp file (merging requires it)
       if (/youtube\.com|youtu\.be/i.test(url)) {
+        const tmpFile = resolve(tmpdir(), `ytdl-${randomUUID()}.mp4`);
         const ytArgs = [
           url, "--no-playlist", "--no-warnings",
           "--user-agent", AXIOS_UA,
-          "--extractor-args", "youtube:player_client=tv_embedded,web",
           "-f", "bestvideo[ext=mp4][height<=1080]+bestaudio[ext=m4a]/bestvideo[height<=1080]+bestaudio/best[height<=1080]/best",
           "--merge-output-format", "mp4",
           "--ffmpeg-location", FFMPEG_BIN,
-          "-o", "-",
+          "-o", tmpFile,
         ];
         const ytProc = spawn(YTDLP_BIN, ytArgs, { stdio: ["ignore", "pipe", "pipe"] });
-        ytProc.stdout.pipe(res);
         let stderrBuf = "";
         ytProc.stderr.on("data", (c: Buffer) => { stderrBuf += c.toString(); });
         ytProc.on("error", (err) => { console.error("yt-dlp spawn error:", err); if (!res.headersSent) res.status(500).json({ error: "Spawn failed" }); });
-        ytProc.on("close", (code) => { if (code !== 0) console.error("yt-dlp exit", code, stderrBuf.slice(-500)); });
-        req.on("close", () => ytProc.kill("SIGTERM"));
+        ytProc.on("close", (code) => {
+          if (code !== 0) {
+            console.error("yt-dlp exit", code, stderrBuf.slice(-500));
+            if (!res.headersSent) res.status(500).json({ error: "Download failed — video may be restricted or unavailable." });
+            return;
+          }
+          if (!existsSync(tmpFile)) { if (!res.headersSent) res.status(500).json({ error: "Output file not found" }); return; }
+          const stream = createReadStream(tmpFile);
+          stream.pipe(res);
+          stream.on("error", (e) => { console.error("Stream error:", e); });
+          res.on("finish", () => { unlink(tmpFile, () => {}); });
+          res.on("close", () => { unlink(tmpFile, () => {}); });
+        });
+        req.on("close", () => { ytProc.kill("SIGTERM"); unlink(tmpFile, () => {}); });
         return;
       }
       try {
@@ -629,18 +646,15 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
 
     const isYouTubeStream = /youtube\.com|youtu\.be/i.test(streamUrl);
-    const args: string[] = [
-      streamUrl, "--no-playlist", "--no-warnings",
-      "--user-agent", AXIOS_UA,
-      "-o", "-",
-    ];
-    if (isYouTubeStream) {
-      args.splice(args.length - 1, 0, "--extractor-args", "youtube:player_client=tv_embedded,web");
-    }
 
     if (isAudio) {
-      // Download best audio and pipe through ffmpeg to convert to mp3
-      args.push("-f", "bestaudio/best");
+      // Audio: single stream → pipe directly to stdout through ffmpeg
+      const args: string[] = [
+        streamUrl, "--no-playlist", "--no-warnings",
+        "--user-agent", AXIOS_UA,
+        "-f", "bestaudio/best",
+        "-o", "-",
+      ];
       const ytProc = spawn(YTDLP_BIN, args, { stdio: ["ignore", "pipe", "pipe"] });
       const ffProc = spawn(FFMPEG_BIN, [
         "-i", "pipe:0",
@@ -673,8 +687,51 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         if (code !== 0) console.error("ffmpeg exit", code, ffStderr.slice(-300));
       });
       req.on("close", () => { ytProc.kill("SIGTERM"); ffProc.kill("SIGTERM"); });
+    } else if (isYouTubeStream) {
+      // YouTube video: must download to temp file first (merging video+audio can't pipe to stdout)
+      const tmpFile = resolve(tmpdir(), `ytdl-${randomUUID()}.mp4`);
+      const args: string[] = [
+        streamUrl, "--no-playlist", "--no-warnings",
+        "--user-agent", AXIOS_UA,
+        "-f", formatStr,
+        "--merge-output-format", "mp4",
+        "--ffmpeg-location", FFMPEG_BIN,
+        "-o", tmpFile,
+      ];
+      const proc = spawn(YTDLP_BIN, args, { stdio: ["ignore", "pipe", "pipe"] });
+      let stderrBuf = "";
+      proc.stderr.on("data", (c: Buffer) => { stderrBuf += c.toString(); });
+      proc.on("error", (err) => {
+        console.error("yt-dlp spawn error:", err);
+        if (!res.headersSent) res.status(500).json({ error: "Spawn failed" });
+      });
+      proc.on("close", (code) => {
+        if (code !== 0) {
+          console.error("yt-dlp exit", code, stderrBuf.slice(-500));
+          if (!res.headersSent) res.status(500).json({ error: "Download failed — video may be restricted or unavailable." });
+          return;
+        }
+        if (!existsSync(tmpFile)) {
+          if (!res.headersSent) res.status(500).json({ error: "Output file not found after download" });
+          return;
+        }
+        const stream = createReadStream(tmpFile);
+        stream.pipe(res);
+        stream.on("error", (err) => { console.error("Stream error:", err); });
+        res.on("finish", () => { unlink(tmpFile, () => {}); });
+        res.on("close", () => { unlink(tmpFile, () => {}); });
+      });
+      req.on("close", () => { proc.kill("SIGTERM"); unlink(tmpFile, () => {}); });
     } else {
-      args.push("-f", formatStr, "--merge-output-format", "mp4", "--ffmpeg-location", FFMPEG_BIN);
+      // Other platforms: pipe directly to stdout
+      const args: string[] = [
+        streamUrl, "--no-playlist", "--no-warnings",
+        "--user-agent", AXIOS_UA,
+        "-f", formatStr,
+        "--merge-output-format", "mp4",
+        "--ffmpeg-location", FFMPEG_BIN,
+        "-o", "-",
+      ];
       const proc = spawn(YTDLP_BIN, args, { stdio: ["ignore", "pipe", "pipe"] });
       proc.stdout.pipe(res);
 
