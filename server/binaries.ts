@@ -5,7 +5,10 @@ import https from "https";
 import http from "http";
 import { createRequire } from "module";
 
-const _require = createRequire(import.meta.url);
+// In CJS builds (e.g. Render), import.meta.url is undefined — use __filename instead.
+const _require = createRequire(
+  typeof __filename !== "undefined" ? __filename : import.meta.url
+);
 
 // ffmpeg-static bundles a portable ffmpeg binary that works on any platform
 export const FFMPEG_BIN: string = _require("ffmpeg-static");
