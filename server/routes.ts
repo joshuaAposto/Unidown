@@ -145,6 +145,82 @@ async function analyzeInstagram(url: string, platform: string): Promise<any> {
   return { title, platform, thumbnail, downloadable: true, qualities };
 }
 
+// ─── Deku API for YouTube ─────────────────────────────────────────────────────
+
+const DEKU_API_KEY = "306bedc73c8e02ea8ab711d370dc245b";
+const DEKU_API_BASE = "https://deku-api.giize.com/download/youtube";
+
+async function dekuYouTubeGetInfo(url: string): Promise<{
+  title: string;
+  thumbnail: string;
+  duration: number;
+  author: string;
+  qualities: QualityOption[];
+}> {
+  const apiUrl = `${DEKU_API_BASE}?url=${encodeURIComponent(url)}&apikey=${DEKU_API_KEY}`;
+  const res = await axios.get(apiUrl, { timeout: 30000 });
+  const data = res.data;
+  if (!data.status || !data.result?.success) throw new Error("Deku API returned failure");
+
+  const result = data.result;
+  const medias: any[] = result.medias || [];
+
+  const combinedMp4 = medias
+    .filter((m: any) => m.is_audio === true && m.ext === "mp4" && m.height)
+    .sort((a: any, b: any) => (b.height || 0) - (a.height || 0));
+
+  const videoOnlyMp4 = medias
+    .filter((m: any) => !m.audioQuality && m.type === "video" && m.ext === "mp4" && m.height)
+    .sort((a: any, b: any) => (b.height || 0) - (a.height || 0));
+
+  const audioStreams = medias
+    .filter((m: any) => m.type === "audio" && m.ext === "m4a")
+    .sort((a: any, b: any) => (b.bitrate || 0) - (a.bitrate || 0));
+
+  const bestAudio = audioStreams[0];
+  const qualities: QualityOption[] = [];
+
+  const hdVideo = videoOnlyMp4.find((m: any) => m.height >= 720 && m.height <= 1080);
+  if (hdVideo && bestAudio) {
+    qualities.push({
+      key: "hd",
+      label: "HD MP4",
+      sublabel: `${hdVideo.height}p`,
+      ext: "mp4",
+      formatStr: `deku_hd:${hdVideo.url}|||${bestAudio.url}`,
+    });
+  }
+
+  const sdCombined = combinedMp4[0];
+  if (sdCombined) {
+    qualities.push({
+      key: "sd",
+      label: "SD MP4",
+      sublabel: `${sdCombined.height}p`,
+      ext: "mp4",
+      formatStr: `deku_direct:${sdCombined.url}`,
+    });
+  }
+
+  if (bestAudio) {
+    qualities.push({
+      key: "audio",
+      label: "MP3",
+      sublabel: "Audio only",
+      ext: "mp3",
+      formatStr: `deku_audio:${bestAudio.url}`,
+    });
+  }
+
+  return {
+    title: result.title || "YouTube Video",
+    thumbnail: result.thumbnail || "",
+    duration: result.duration || 0,
+    author: result.author || "",
+    qualities,
+  };
+}
+
 // ─── yt-dlp for other platforms ───────────────────────────────────────────────
 
 async function resolveRedirect(url: string): Promise<string> {
@@ -361,7 +437,41 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       }
     }
 
-    // 2️⃣ Other media platforms → yt-dlp
+    // 2️⃣ YouTube → Deku API (reliable on all hosting, no yt-dlp needed)
+    const isYouTubeUrl = /youtube\.com|youtu\.be/i.test(url);
+    if (isYouTubeUrl) {
+      try {
+        const info = await dekuYouTubeGetInfo(url);
+        return res.json({
+          title: info.title,
+          platform: "YouTube",
+          thumbnail: info.thumbnail,
+          downloadable: true,
+          duration: info.duration,
+          uploader: info.author || undefined,
+          qualities: info.qualities.length > 0 ? info.qualities : [
+            { key: "sd", label: "SD MP4", sublabel: "360p", ext: "mp4", formatStr: "best" },
+          ],
+        });
+      } catch (e: any) {
+        console.error("Deku API failed for YouTube, falling back to yt-dlp:", e.message);
+        const ytId = extractYouTubeId(url);
+        const thumbnail = ytId ? `https://img.youtube.com/vi/${ytId}/maxresdefault.jpg` : undefined;
+        return res.json({
+          title: "YouTube Video",
+          platform: "YouTube",
+          thumbnail,
+          downloadable: true,
+          qualities: [
+            { key: "hd", label: "HD MP4", sublabel: "720p–1080p", ext: "mp4", formatStr: "bestvideo[ext=mp4][height<=1080]+bestaudio[ext=m4a]/best[height<=1080]/best" },
+            { key: "sd", label: "SD MP4", sublabel: "360p–480p", ext: "mp4", formatStr: "bestvideo[ext=mp4][height<=480]+bestaudio[ext=m4a]/best[height<=480]/worst" },
+            { key: "audio", label: "MP3", sublabel: "Audio only", ext: "mp3", formatStr: "bestaudio/best" },
+          ],
+        });
+      }
+    }
+
+    // 3️⃣ Other media platforms → yt-dlp
     const directExtensions = /\.(mp4|mp3|wav|flac|aac|ogg|avi|mkv|mov|webm|jpg|jpeg|png|gif|webp|pdf|zip|tar|gz|rar|doc|docx)(\?|$)/i;
     if (!directExtensions.test(url)) {
       try {
@@ -386,42 +496,6 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           resolvedUrl: resolvedUrl !== url ? resolvedUrl : undefined,
         });
       } catch (e: any) {
-        // yt-dlp failed — for YouTube/known video platforms still use yt-dlp for download
-        const isYouTubeUrl = /youtube\.com|youtu\.be/i.test(url);
-        if (isYouTubeUrl) {
-          console.error("yt-dlp info failed for YouTube, using default qualities:", e.message);
-          const ytId = extractYouTubeId(url);
-          const thumbnail = ytId ? `https://img.youtube.com/vi/${ytId}/maxresdefault.jpg` : undefined;
-          return res.json({
-            title: "YouTube Video",
-            platform: "YouTube",
-            thumbnail,
-            downloadable: true,
-            qualities: [
-              {
-                key: "hd",
-                label: "HD MP4",
-                sublabel: "720p–1080p",
-                ext: "mp4",
-                formatStr: "bestvideo[ext=mp4][height<=1080]+bestaudio[ext=m4a]/bestvideo[height<=1080]+bestaudio/best[height<=1080]/best",
-              },
-              {
-                key: "sd",
-                label: "SD MP4",
-                sublabel: "360p–480p",
-                ext: "mp4",
-                formatStr: "bestvideo[ext=mp4][height<=480]+bestaudio[ext=m4a]/bestvideo[height<=480]+bestaudio/best[height<=480]/worst",
-              },
-              {
-                key: "audio",
-                label: "MP3",
-                sublabel: "Audio only",
-                ext: "mp3",
-                formatStr: "bestaudio/best",
-              },
-            ],
-          });
-        }
         // yt-dlp failed — try direct file fallback
       }
     }
@@ -592,6 +666,98 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       } catch (err: any) {
         if (!res.headersSent) res.status(500).json({ error: "Image download failed: " + err.message });
       }
+      return;
+    }
+
+    // ─── Deku YouTube: SD (combined stream, direct proxy) ───────────────────
+    if (formatStr.startsWith("deku_direct:")) {
+      const directUrl = formatStr.slice("deku_direct:".length);
+      try {
+        const fileRes = await axios.get(directUrl, {
+          responseType: "stream",
+          timeout: 60000,
+          headers: { "User-Agent": AXIOS_UA },
+        });
+        res.setHeader("Content-Type", "video/mp4");
+        if (fileRes.headers["content-length"]) res.setHeader("Content-Length", fileRes.headers["content-length"]);
+        res.on("error", () => {});
+        fileRes.data.pipe(res);
+      } catch (err: any) {
+        console.error("Deku direct download error:", err.message);
+        if (!res.headersSent) res.status(500).json({ error: "Download failed: " + err.message });
+      }
+      return;
+    }
+
+    // ─── Deku YouTube: MP3 (audio stream via ffmpeg) ─────────────────────────
+    if (formatStr.startsWith("deku_audio:")) {
+      const audioUrl = formatStr.slice("deku_audio:".length);
+      res.setHeader("Content-Type", "audio/mpeg");
+      res.setHeader("Content-Disposition", `attachment; filename="${safeTitle}.mp3"`);
+      try {
+        const audioRes = await axios.get(audioUrl, {
+          responseType: "stream",
+          timeout: 60000,
+          headers: { "User-Agent": AXIOS_UA },
+        });
+        const ffProc = spawn(FFMPEG_BIN, [
+          "-i", "pipe:0",
+          "-f", "mp3", "-ab", "192k", "-vn", "-write_xing", "0",
+          "pipe:1",
+        ], { stdio: ["pipe", "pipe", "pipe"] });
+        audioRes.data.pipe(ffProc.stdin);
+        res.on("error", () => {});
+        ffProc.stdout.pipe(res);
+        let ffStderr = "";
+        ffProc.stderr.on("data", (c: Buffer) => { ffStderr += c.toString(); });
+        ffProc.on("error", (err) => {
+          console.error("ffmpeg audio error:", err.message);
+          if (!res.headersSent) res.status(500).json({ error: "Audio conversion failed" });
+        });
+        ffProc.on("close", (code) => { if (code !== 0) console.error("ffmpeg audio exit", code, ffStderr.slice(-300)); });
+        req.on("close", () => { ffProc.kill("SIGTERM"); });
+      } catch (err: any) {
+        console.error("Deku audio download error:", err.message);
+        if (!res.headersSent) res.status(500).json({ error: "Audio download failed: " + err.message });
+      }
+      return;
+    }
+
+    // ─── Deku YouTube: HD (video-only + audio merged via ffmpeg) ────────────
+    if (formatStr.startsWith("deku_hd:")) {
+      const parts = formatStr.slice("deku_hd:".length).split("|||");
+      const videoUrl = parts[0];
+      const audioUrl = parts[1];
+      const tmpFile = resolve(tmpdir(), `dekuyt-${randomUUID()}.mp4`);
+      const ffProc = spawn(FFMPEG_BIN, [
+        "-i", videoUrl,
+        "-i", audioUrl,
+        "-c:v", "copy",
+        "-c:a", "aac",
+        "-movflags", "+faststart",
+        "-y", tmpFile,
+      ], { stdio: ["ignore", "pipe", "pipe"] });
+      let ffStderr = "";
+      ffProc.stderr.on("data", (c: Buffer) => { ffStderr += c.toString(); });
+      ffProc.on("error", (err) => {
+        console.error("ffmpeg HD merge error:", err.message);
+        if (!res.headersSent) res.status(500).json({ error: "Video merge failed" });
+      });
+      ffProc.on("close", (code) => {
+        if (code !== 0) {
+          console.error("ffmpeg HD exit", code, ffStderr.slice(-500));
+          if (!res.headersSent) res.status(500).json({ error: "HD download failed" });
+          return;
+        }
+        if (!existsSync(tmpFile)) { if (!res.headersSent) res.status(500).json({ error: "Output file not found" }); return; }
+        const stream = createReadStream(tmpFile);
+        res.on("error", () => {});
+        stream.on("error", (e) => { console.error("Stream error:", e); });
+        stream.pipe(res);
+        res.on("finish", () => { unlink(tmpFile, () => {}); });
+        res.on("close", () => { unlink(tmpFile, () => {}); });
+      });
+      req.on("close", () => { ffProc.kill("SIGTERM"); unlink(tmpFile, () => {}); });
       return;
     }
 
