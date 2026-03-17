@@ -22,8 +22,6 @@ import { apiRequest } from "@/lib/queryClient";
 import type { User as UserType, Download as DownloadType, UrlInfo, QualityOption } from "@shared/schema";
 import { formatDistanceToNow } from "date-fns";
 
-// ─── Theme Toggle ─────────────────────────────────────────────────────────────
-
 function ThemeToggle() {
   const { theme, setTheme } = useContext(ThemeContext);
   return (
@@ -47,8 +45,6 @@ function ThemeToggle() {
     </button>
   );
 }
-
-// ─── Platform config ──────────────────────────────────────────────────────────
 
 const PLATFORM_CONFIG: Record<string, { icon: React.ReactNode; color: string; bg: string }> = {
   "YouTube":      { icon: <SiYoutube className="w-3.5 h-3.5" />,   color: "text-red-500",     bg: "bg-red-500/10 dark:bg-red-500/15" },
@@ -77,8 +73,6 @@ function PlatformBadge({ platform }: { platform: string }) {
   );
 }
 
-// ─── Quality button config ────────────────────────────────────────────────────
-
 type QualityStyle = { icon: React.ReactNode; color: string; border: string; bg: string; hoverBg: string };
 
 const QUALITY_STYLE_MAP: Record<string, QualityStyle> = {
@@ -105,8 +99,6 @@ function getQualityStyle(key: string): QualityStyle {
   }
   return QUALITY_STYLE_MAP.best;
 }
-
-// ─── Welcome Modal ────────────────────────────────────────────────────────────
 
 function WelcomeModal({ onRegister }: { onRegister: (user: UserType) => void }) {
   const [name, setName] = useState("");
@@ -172,8 +164,6 @@ function WelcomeModal({ onRegister }: { onRegister: (user: UserType) => void }) 
   );
 }
 
-// ─── Duration formatter ───────────────────────────────────────────────────────
-
 function formatDuration(seconds?: number) {
   if (!seconds) return null;
   const h = Math.floor(seconds / 3600);
@@ -182,8 +172,6 @@ function formatDuration(seconds?: number) {
   if (h > 0) return `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
   return `${m}:${String(s).padStart(2, "0")}`;
 }
-
-// ─── Analysis Result Card ─────────────────────────────────────────────────────
 
 function AnalysisCard({
   info,
@@ -208,7 +196,6 @@ function AnalysisCard({
     setActiveDownload(q.key);
 
     try {
-      // Create download record with the chosen quality; formatStr cached server-side
       const res = await apiRequest("POST", "/api/downloads", {
         userId: user.id,
         userName: user.name,
@@ -248,7 +235,6 @@ function AnalysisCard({
       transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }}
     >
       <Card className="border-primary/20 shadow-lg overflow-hidden" data-testid="card-analysis-result">
-        {/* Thumbnail */}
         {info.thumbnail && (
           <div className="relative w-full aspect-video overflow-hidden bg-muted">
             <img
@@ -270,7 +256,6 @@ function AnalysisCard({
         )}
 
         <CardContent className="p-4 space-y-4">
-          {/* Title row */}
           <div>
             {!info.thumbnail && <div className="mb-1.5"><PlatformBadge platform={info.platform} /></div>}
             <p className="font-semibold text-sm leading-snug line-clamp-2" data-testid="text-download-title">
@@ -283,7 +268,6 @@ function AnalysisCard({
             )}
           </div>
 
-          {/* Quality Buttons */}
           {info.qualities && info.qualities.length > 0 && (
             <div className="space-y-2">
               <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Choose Quality</p>
@@ -335,8 +319,6 @@ function AnalysisCard({
   );
 }
 
-// ─── Download history card ────────────────────────────────────────────────────
-
 const QUALITY_LABELS_STATIC: Record<string, { label: string; color: string }> = {
   hd:    { label: "HD",  color: "text-primary bg-primary/10" },
   sd:    { label: "SD",  color: "text-blue-400 bg-blue-400/10" },
@@ -376,12 +358,10 @@ function DownloadCard({ download, showUser = false, onDelete }: { download: Down
       className="flex items-center gap-3 p-3 rounded-xl bg-card border border-card-border hover:border-primary/25 hover:shadow-sm transition-all duration-200"
       data-testid={`card-download-${download.id}`}
     >
-      {/* Platform icon */}
       <div className={`flex-shrink-0 w-9 h-9 rounded-lg flex items-center justify-center ${cfg.bg} ${cfg.color}`}>
         {cfg.icon}
       </div>
 
-      {/* Info */}
       <div className="flex-1 min-w-0 space-y-0.5">
         <div className="flex items-center gap-1.5">
           <p className="text-sm font-medium leading-tight line-clamp-1 text-foreground" data-testid={`text-download-title-${download.id}`}>
@@ -404,7 +384,6 @@ function DownloadCard({ download, showUser = false, onDelete }: { download: Down
         </div>
       </div>
 
-      {/* Status icon + delete */}
       <div className="flex-shrink-0 flex items-center gap-1.5">
         {download.status === "completed" ? (
           <CheckCircle className="w-4 h-4 text-emerald-500" />
@@ -428,8 +407,6 @@ function DownloadCard({ download, showUser = false, onDelete }: { download: Down
   );
 }
 
-// ─── Empty state ──────────────────────────────────────────────────────────────
-
 function EmptyState({ icon: Icon, title, subtitle }: { icon: any; title: string; subtitle: string }) {
   return (
     <div className="flex flex-col items-center justify-center py-10 text-center">
@@ -442,8 +419,6 @@ function EmptyState({ icon: Icon, title, subtitle }: { icon: any; title: string;
   );
 }
 
-// ─── Main Page ────────────────────────────────────────────────────────────────
-
 export default function Home() {
   const [user, setUser] = useState<UserType | null>(null);
   const [showWelcome, setShowWelcome] = useState(false);
@@ -455,7 +430,6 @@ export default function Home() {
   const qc = useQueryClient();
   const { toast } = useToast();
 
-  // Restore user from NeonDB via deviceId
   useEffect(() => {
     localStorage.removeItem("userId");
     localStorage.removeItem("userName");
@@ -476,13 +450,11 @@ export default function Home() {
       .catch(() => setShowWelcome(true));
   }, []);
 
-  // Recent downloads (global feed)
   const { data: recentDownloads = [], isLoading: recentLoading } = useQuery<DownloadType[]>({
     queryKey: ["/api/downloads/recent"],
     refetchInterval: 8000,
   });
 
-  // User download history
   const { data: userDownloads = [], isLoading: userLoading } = useQuery<DownloadType[]>({
     queryKey: ["/api/downloads/user", user?.id],
     enabled: !!user?.id,
@@ -490,7 +462,6 @@ export default function Home() {
     refetchInterval: 10000,
   });
 
-  // Analyze URL
   const analyzeMutation = useMutation({
     mutationFn: async (targetUrl: string) => {
       const res = await apiRequest("POST", "/api/analyze", { url: targetUrl });
@@ -565,7 +536,6 @@ export default function Home() {
         <WelcomeModal onRegister={(u) => { setUser(u); setShowWelcome(false); }} />
       )}
 
-      {/* Navbar */}
       <header className="sticky top-0 z-50 w-full border-b border-border bg-background/80 backdrop-blur-md">
         <div className="max-w-5xl mx-auto px-4 h-14 flex items-center justify-between">
           <div className="flex items-center gap-2.5">
@@ -589,7 +559,6 @@ export default function Home() {
         </div>
       </header>
 
-      {/* Hero */}
       <section className="relative overflow-hidden">
         <div className="hero-gradient absolute inset-0 pointer-events-none" />
         <div className="absolute top-16 left-1/4 w-72 h-72 bg-primary/6 dark:bg-primary/10 rounded-full blur-3xl pointer-events-none animate-pulse-glow" />
@@ -612,7 +581,6 @@ export default function Home() {
             </p>
           </motion.div>
 
-          {/* URL input */}
           <motion.div
             initial={{ opacity: 0, y: 32 }} animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.6, delay: 0.15, ease: [0.22, 1, 0.36, 1] }}
@@ -661,7 +629,6 @@ export default function Home() {
               </CardContent>
             </Card>
 
-            {/* Platform badges */}
             <div className="flex flex-wrap justify-center gap-1.5 mt-3">
               {(["YouTube", "Facebook", "TikTok", "Instagram", "Vimeo", "Twitter/X"] as const).map((p) => (
                 <span key={p} className={`platform-badge text-[11px] ${PLATFORM_CONFIG[p]?.bg} ${PLATFORM_CONFIG[p]?.color}`}>
@@ -676,7 +643,6 @@ export default function Home() {
         </div>
       </section>
 
-      {/* Analysis result */}
       <div className="max-w-5xl mx-auto px-4">
         <AnimatePresence mode="wait">
           {analyzing && (
@@ -705,11 +671,9 @@ export default function Home() {
         </AnimatePresence>
       </div>
 
-      {/* Global feed + My downloads */}
       <section className="max-w-5xl mx-auto px-4 pb-16">
         <div className="grid gap-6 lg:grid-cols-2">
 
-          {/* Global Recent Downloads */}
           <div>
             <div className="flex items-center justify-between mb-4">
               <div className="flex items-center gap-2">
@@ -748,7 +712,6 @@ export default function Home() {
             </div>
           </div>
 
-          {/* My Downloads */}
           <div>
             <div className="flex items-center justify-between mb-4">
               <div className="flex items-center gap-2">
@@ -796,7 +759,6 @@ export default function Home() {
         </div>
       </section>
 
-      {/* Footer */}
       <footer className="border-t border-border py-6">
         <div className="max-w-5xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-2 text-xs text-muted-foreground">
           <div className="flex items-center gap-2">

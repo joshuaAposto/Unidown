@@ -17,10 +17,7 @@ let YTDLP_BIN = resolve(process.cwd(), "bin/yt-dlp");
 const AXIOS_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36";
 const IG_MOBILE_UA = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 Instagram/314.0.0.0.0";
 
-// In-memory cache: downloadId → { formatStr, qualityKey }
 const downloadFormatCache = new Map<string, { formatStr: string; qualityKey: string }>();
-
-// ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function getClientIp(req: Request): string {
   const forwarded = req.headers["x-forwarded-for"];
@@ -48,8 +45,6 @@ function detectPlatform(url: string): string {
   if (ext && ["zip", "tar", "gz", "rar"].includes(ext)) return "Archive";
   return "Direct Link";
 }
-
-// ─── TikTok via tikwm.com API ─────────────────────────────────────────────────
 
 async function tikwmFetch(url: string): Promise<any> {
   const apiUrl = `https://tikwm.com/api/?url=${encodeURIComponent(url)}&hd=1`;
@@ -88,8 +83,6 @@ async function analyzeTikTok(url: string, platform: string): Promise<any> {
     qualities,
   };
 }
-
-// ─── Instagram via page scraping (facebookexternalhit UA exposes og:video) ────
 
 async function analyzeInstagram(url: string, platform: string): Promise<any> {
   const FB_UA = "facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)";
@@ -145,14 +138,8 @@ async function analyzeInstagram(url: string, platform: string): Promise<any> {
   return { title, platform, thumbnail, downloadable: true, qualities };
 }
 
-// ─── Deku API for YouTube ─────────────────────────────────────────────────────
-
 const DEKU_API_KEY = "306bedc73c8e02ea8ab711d370dc245b";
 const DEKU_API_BASE = "https://deku-api.giize.com/download/youtube";
-
-function sanitizeKey(s: string): string {
-  return s.toLowerCase().replace(/[^a-z0-9]/g, "_");
-}
 
 async function dekuYouTubeGetInfo(url: string): Promise<{
   title: string;
@@ -161,8 +148,6 @@ async function dekuYouTubeGetInfo(url: string): Promise<{
   author: string;
   qualities: QualityOption[];
 }> {
-  // Deku API is used for metadata only (title, thumbnail, available quality list).
-  // Actual downloads use yt-dlp so URLs are fetched on our server's IP (avoids 403 on Google CDN).
   const apiUrl = `${DEKU_API_BASE}?url=${encodeURIComponent(url)}&apikey=${DEKU_API_KEY}`;
   const res = await axios.get(apiUrl, { timeout: 30000 });
   const data = res.data;
@@ -171,7 +156,6 @@ async function dekuYouTubeGetInfo(url: string): Promise<{
   const result = data.result;
   const medias: any[] = result.medias || [];
 
-  // Collect available heights per ext from the API response
   const mp4Heights = [...new Set(
     medias.filter((m: any) => m.type === "video" && m.ext === "mp4" && m.height).map((m: any) => m.height as number)
   )].sort((a, b) => b - a);
@@ -184,7 +168,6 @@ async function dekuYouTubeGetInfo(url: string): Promise<{
 
   const qualities: QualityOption[] = [];
 
-  // ── MP4 video qualities → yt-dlp format strings (runs on our server's IP)
   for (const h of mp4Heights) {
     qualities.push({
       key: `mp4_${h}p`,
@@ -195,7 +178,6 @@ async function dekuYouTubeGetInfo(url: string): Promise<{
     });
   }
 
-  // ── WEBM video qualities
   for (const h of webmHeights) {
     qualities.push({
       key: `webm_${h}p`,
@@ -206,7 +188,6 @@ async function dekuYouTubeGetInfo(url: string): Promise<{
     });
   }
 
-  // ── Audio-only quality
   if (hasAudio) {
     qualities.push({
       key: "audio",
@@ -225,8 +206,6 @@ async function dekuYouTubeGetInfo(url: string): Promise<{
     qualities,
   };
 }
-
-// ─── yt-dlp for other platforms ───────────────────────────────────────────────
 
 async function resolveRedirect(url: string): Promise<string> {
   try {
@@ -279,7 +258,6 @@ async function ytdlpGetInfo(url: string): Promise<any> {
 function buildQualitiesFromYtdlp(info: any): QualityOption[] {
   const formats: any[] = info.formats || [];
 
-  // Detect image-only content (e.g. Twitter image tweets)
   const imageExts = new Set(["jpg", "jpeg", "png", "gif", "webp"]);
   const videoFormats = formats.filter((f: any) => f.height && f.height > 0);
   const imageFormats = formats.filter((f: any) => f.ext && imageExts.has(f.ext.toLowerCase()) && f.url);
@@ -332,8 +310,6 @@ function buildQualitiesFromYtdlp(info: any): QualityOption[] {
   return qualities;
 }
 
-// ─── Direct file fallback ─────────────────────────────────────────────────────
-
 async function analyzeDirectFile(url: string, platform: string): Promise<any> {
   const headRes = await axios.head(url, {
     timeout: 6000,
@@ -375,15 +351,11 @@ async function analyzeDirectFile(url: string, platform: string): Promise<any> {
   };
 }
 
-// ─── Routes ───────────────────────────────────────────────────────────────────
-
 export async function registerRoutes(httpServer: Server, app: Express): Promise<Server> {
-  // Ensure yt-dlp binary is present (downloads from GitHub if not found, e.g. on Render)
   YTDLP_BIN = await ensureYtdlp();
   console.log(`[routes] yt-dlp: ${YTDLP_BIN}`);
   console.log(`[routes] ffmpeg: ${FFMPEG_BIN}`);
 
-  // Register / retrieve user
   app.post("/api/users/register", async (req: Request, res: Response) => {
     try {
       const body = insertUserSchema.parse({
@@ -411,8 +383,6 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     res.json(user);
   });
 
-  // ─── Analyze URL ────────────────────────────────────────────────────────────
-
   app.post("/api/analyze", async (req: Request, res: Response) => {
     const { url } = req.body;
     if (!url) return res.status(400).json({ error: "URL is required" });
@@ -420,7 +390,6 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
     const platform = detectPlatform(url);
 
-    // 1️⃣ TikTok → tikwm.com API
     if (platform === "TikTok") {
       try {
         const info = await analyzeTikTok(url, platform);
@@ -431,7 +400,6 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       }
     }
 
-    // 1b️⃣ Instagram → page scraping (facebookexternalhit UA)
     if (platform === "Instagram") {
       try {
         const info = await analyzeInstagram(url, platform);
@@ -442,7 +410,6 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       }
     }
 
-    // 2️⃣ YouTube → Deku API (reliable on all hosting, no yt-dlp needed)
     const isYouTubeUrl = /youtube\.com|youtu\.be/i.test(url);
     if (isYouTubeUrl) {
       try {
@@ -476,11 +443,9 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       }
     }
 
-    // 3️⃣ Other media platforms → yt-dlp
     const directExtensions = /\.(mp4|mp3|wav|flac|aac|ogg|avi|mkv|mov|webm|jpg|jpeg|png|gif|webp|pdf|zip|tar|gz|rar|doc|docx)(\?|$)/i;
     if (!directExtensions.test(url)) {
       try {
-        // Resolve short/redirect links before passing to yt-dlp
         let resolvedUrl = url;
         const isShortLink = /on\.soundcloud\.com|bit\.ly|tinyurl|t\.co|fb\.watch|vm\.tiktok/i.test(url);
         if (isShortLink) {
@@ -501,16 +466,12 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           resolvedUrl: resolvedUrl !== url ? resolvedUrl : undefined,
         });
       } catch (e: any) {
-        // yt-dlp failed — try direct file fallback
       }
     }
 
-    // 3️⃣ Direct file / unknown link
     const directInfo = await analyzeDirectFile(url, platform);
     return res.json(directInfo);
   });
-
-  // ─── Record download ────────────────────────────────────────────────────────
 
   app.post("/api/downloads", async (req: Request, res: Response) => {
     try {
@@ -525,10 +486,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         thumbnail: body.thumbnail,
         qualityKey: body.qualityKey,
       });
-      // Cache the formatStr so the download endpoint doesn't need it in the URL
       if (body.formatStr) {
         downloadFormatCache.set(download.id, { formatStr: body.formatStr, qualityKey: body.qualityKey || "best" });
-        // Expire cache entry after 30 minutes
         setTimeout(() => downloadFormatCache.delete(download.id), 30 * 60 * 1000);
       }
       await storage.updateDownloadStatus(download.id, "completed");
@@ -539,22 +498,19 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
-  // ─── Serve / stream the file ────────────────────────────────────────────────
-
   app.get("/api/download/:id/file", async (req: Request, res: Response) => {
     const download = await storage.getDownload(req.params.id);
     if (!download) return res.status(404).json({ error: "Download not found" });
 
     const { url } = download;
-    // Prefer cached formatStr (avoids long URLs); fall back to query param for legacy requests
     const cached = downloadFormatCache.get(req.params.id);
     const formatStr = cached?.formatStr || (req.query.format as string) || "best";
     const qualityKey = cached?.qualityKey || (req.query.quality as string) || download.qualityKey || "best";
     const isAudio = qualityKey === "audio" || qualityKey.startsWith("audio_") || formatStr.startsWith("deku_audio:");
     const safeTitle = (download.title || "download")
-      .replace(/[\r\n\t]/g, " ")                  // strip newlines
-      .replace(/[^\x20-\x7E]/g, "")               // strip non-ASCII (®, curly quotes, etc.)
-      .replace(/["\\]/g, "")                       // strip chars unsafe in quoted header strings
+      .replace(/[\r\n\t]/g, " ")
+      .replace(/[^\x20-\x7E]/g, "")
+      .replace(/["\\]/g, "")
       .replace(/\s+/g, " ")
       .trim()
       .substring(0, 80) || "download";
@@ -564,14 +520,13 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
     res.setHeader("Content-Type", isAudio ? "audio/mpeg" : "video/mp4");
 
-    // ─── TikTok: re-fetch from tikwm.com and proxy ──────────────────────────
     if (formatStr.startsWith("tiktok_")) {
       try {
         const data = await tikwmFetch(url);
         let videoUrl: string;
         if (formatStr === "tiktok_hd") videoUrl = data.hdplay || data.play;
         else if (formatStr === "tiktok_sd") videoUrl = data.play || data.hdplay;
-        else videoUrl = data.music; // tiktok_audio
+        else videoUrl = data.music;
 
         if (!videoUrl) return res.status(404).json({ error: "Video URL not found" });
 
@@ -595,7 +550,6 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       return;
     }
 
-    // ─── Instagram direct proxy ──────────────────────────────────────────────
     if (formatStr.startsWith("instagram_direct:") || formatStr.startsWith("instagram_audio:")) {
       const igVideoUrl = formatStr.slice(formatStr.indexOf(":") + 1);
       const isIgAudio = formatStr.startsWith("instagram_audio:");
@@ -605,7 +559,6 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         res.setHeader("Content-Disposition", `attachment; filename="${safeTitle}.mp3"`);
 
         try {
-          // Fetch the MP4 from Instagram CDN, pipe into ffmpeg to extract MP3
           const videoRes = await axios.get(igVideoUrl, {
             responseType: "stream",
             timeout: 120000,
@@ -651,7 +604,6 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       return;
     }
 
-    // ─── Direct image proxy (Twitter/X images, etc.) ────────────────────────
     if (formatStr.startsWith("direct_image:")) {
       const imageUrl = formatStr.slice("direct_image:".length);
       const imgExt = imageUrl.split("?")[0].split(".").pop()?.toLowerCase() || "jpg";
@@ -674,107 +626,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       return;
     }
 
-    // ─── Deku YouTube: combined stream direct proxy (mp4 or webm) ───────────
-    if (formatStr.startsWith("deku_direct_")) {
-      const colonIdx = formatStr.indexOf(":");
-      const extPart = formatStr.slice("deku_direct_".length, colonIdx); // "mp4" or "webm"
-      const directUrl = formatStr.slice(colonIdx + 1);
-      const isWebm = extPart === "webm";
-      const contentType = isWebm ? "video/webm" : "video/mp4";
-      const fileExt = isWebm ? "webm" : "mp4";
-      res.setHeader("Content-Type", contentType);
-      res.setHeader("Content-Disposition", `attachment; filename="${safeTitle}.${fileExt}"`);
-      try {
-        const fileRes = await axios.get(directUrl, {
-          responseType: "stream",
-          timeout: 60000,
-          headers: { "User-Agent": AXIOS_UA },
-        });
-        if (fileRes.headers["content-length"]) res.setHeader("Content-Length", fileRes.headers["content-length"]);
-        res.on("error", () => {});
-        fileRes.data.pipe(res);
-      } catch (err: any) {
-        console.error("Deku direct download error:", err.message);
-        if (!res.headersSent) res.status(500).json({ error: "Download failed: " + err.message });
-      }
-      return;
-    }
-
-    // ─── Deku YouTube: MP3 (audio stream via ffmpeg) ─────────────────────────
-    if (formatStr.startsWith("deku_audio:")) {
-      const audioUrl = formatStr.slice("deku_audio:".length);
-      res.setHeader("Content-Type", "audio/mpeg");
-      res.setHeader("Content-Disposition", `attachment; filename="${safeTitle}.mp3"`);
-      try {
-        const audioRes = await axios.get(audioUrl, {
-          responseType: "stream",
-          timeout: 60000,
-          headers: { "User-Agent": AXIOS_UA },
-        });
-        const ffProc = spawn(FFMPEG_BIN, [
-          "-i", "pipe:0",
-          "-f", "mp3", "-ab", "192k", "-vn", "-write_xing", "0",
-          "pipe:1",
-        ], { stdio: ["pipe", "pipe", "pipe"] });
-        audioRes.data.pipe(ffProc.stdin);
-        res.on("error", () => {});
-        ffProc.stdout.pipe(res);
-        let ffStderr = "";
-        ffProc.stderr.on("data", (c: Buffer) => { ffStderr += c.toString(); });
-        ffProc.on("error", (err) => {
-          console.error("ffmpeg audio error:", err.message);
-          if (!res.headersSent) res.status(500).json({ error: "Audio conversion failed" });
-        });
-        ffProc.on("close", (code) => { if (code !== 0) console.error("ffmpeg audio exit", code, ffStderr.slice(-300)); });
-        req.on("close", () => { ffProc.kill("SIGTERM"); });
-      } catch (err: any) {
-        console.error("Deku audio download error:", err.message);
-        if (!res.headersSent) res.status(500).json({ error: "Audio download failed: " + err.message });
-      }
-      return;
-    }
-
-    // ─── Deku YouTube: HD (video-only + audio merged via ffmpeg) ────────────
-    if (formatStr.startsWith("deku_hd:")) {
-      const parts = formatStr.slice("deku_hd:".length).split("|||");
-      const videoUrl = parts[0];
-      const audioUrl = parts[1];
-      const tmpFile = resolve(tmpdir(), `dekuyt-${randomUUID()}.mp4`);
-      const ffProc = spawn(FFMPEG_BIN, [
-        "-i", videoUrl,
-        "-i", audioUrl,
-        "-c:v", "copy",
-        "-c:a", "aac",
-        "-movflags", "+faststart",
-        "-y", tmpFile,
-      ], { stdio: ["ignore", "pipe", "pipe"] });
-      let ffStderr = "";
-      ffProc.stderr.on("data", (c: Buffer) => { ffStderr += c.toString(); });
-      ffProc.on("error", (err) => {
-        console.error("ffmpeg HD merge error:", err.message);
-        if (!res.headersSent) res.status(500).json({ error: "Video merge failed" });
-      });
-      ffProc.on("close", (code) => {
-        if (code !== 0) {
-          console.error("ffmpeg HD exit", code, ffStderr.slice(-500));
-          if (!res.headersSent) res.status(500).json({ error: "HD download failed" });
-          return;
-        }
-        if (!existsSync(tmpFile)) { if (!res.headersSent) res.status(500).json({ error: "Output file not found" }); return; }
-        const stream = createReadStream(tmpFile);
-        res.on("error", () => {});
-        stream.on("error", (e) => { console.error("Stream error:", e); });
-        stream.pipe(res);
-        res.on("finish", () => { unlink(tmpFile, () => {}); });
-        res.on("close", () => { unlink(tmpFile, () => {}); });
-      });
-      req.on("close", () => { ffProc.kill("SIGTERM"); unlink(tmpFile, () => {}); });
-      return;
-    }
-
-    // ─── Direct file proxy ──────────────────────────────────────────────────
     if (formatStr === "direct") {
-      // YouTube URLs can't be directly proxied — use yt-dlp with temp file (merging requires it)
       if (/youtube\.com|youtu\.be/i.test(url)) {
         const tmpFile = resolve(tmpdir(), `ytdl-${randomUUID()}.mp4`);
         const ytArgs = [
@@ -824,8 +676,6 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       return;
     }
 
-    // ─── yt-dlp stream ──────────────────────────────────────────────────────
-    // Resolve short/redirect links before passing to yt-dlp
     let streamUrl = url;
     const isShortStreamLink = /on\.soundcloud\.com|bit\.ly|tinyurl|t\.co|fb\.watch|vm\.tiktok/i.test(url);
     if (isShortStreamLink) {
@@ -835,7 +685,6 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     const isYouTubeStream = /youtube\.com|youtu\.be/i.test(streamUrl);
 
     if (isAudio) {
-      // Audio: single stream → pipe directly to stdout through ffmpeg
       const args: string[] = [
         streamUrl, "--no-playlist", "--no-warnings",
         "--user-agent", AXIOS_UA,
@@ -876,7 +725,6 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       });
       req.on("close", () => { ytProc.kill("SIGTERM"); ffProc.kill("SIGTERM"); });
     } else if (isYouTubeStream) {
-      // YouTube video: must download to temp file first (merging video+audio can't pipe to stdout)
       const tmpFile = resolve(tmpdir(), `ytdl-${randomUUID()}.mp4`);
       const args: string[] = [
         streamUrl, "--no-playlist", "--no-warnings",
@@ -912,7 +760,6 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       });
       req.on("close", () => { proc.kill("SIGTERM"); unlink(tmpFile, () => {}); });
     } else {
-      // Other platforms: pipe directly to stdout
       const args: string[] = [
         streamUrl, "--no-playlist", "--no-warnings",
         "--user-agent", AXIOS_UA,
@@ -937,8 +784,6 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       req.on("close", () => proc.kill("SIGTERM"));
     }
   });
-
-  // ─── Recent + user downloads ────────────────────────────────────────────────
 
   app.get("/api/downloads/recent", async (_req, res) => {
     res.json(await storage.getRecentDownloads(20));
