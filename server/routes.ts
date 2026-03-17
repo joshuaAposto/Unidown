@@ -10,10 +10,10 @@ import { promisify } from "util";
 import { tmpdir } from "os";
 import { createReadStream, unlink, existsSync } from "fs";
 import { randomUUID } from "crypto";
+import { ensureYtdlp, FFMPEG_BIN } from "./binaries";
 
 const execFileAsync = promisify(execFile);
-const YTDLP_BIN = resolve(process.cwd(), "bin/yt-dlp");
-const FFMPEG_BIN = "/nix/store/bmirb5k0vksybajy1wrfgq9ckgs37q0c-replit-runtime-path/bin/ffmpeg";
+let YTDLP_BIN = resolve(process.cwd(), "bin/yt-dlp");
 const AXIOS_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36";
 const IG_MOBILE_UA = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 Instagram/314.0.0.0.0";
 
@@ -297,6 +297,10 @@ async function analyzeDirectFile(url: string, platform: string): Promise<any> {
 // ─── Routes ───────────────────────────────────────────────────────────────────
 
 export async function registerRoutes(httpServer: Server, app: Express): Promise<Server> {
+  // Ensure yt-dlp binary is present (downloads from GitHub if not found, e.g. on Render)
+  YTDLP_BIN = await ensureYtdlp();
+  console.log(`[routes] yt-dlp: ${YTDLP_BIN}`);
+  console.log(`[routes] ffmpeg: ${FFMPEG_BIN}`);
 
   // Register / retrieve user
   app.post("/api/users/register", async (req: Request, res: Response) => {
