@@ -2,7 +2,10 @@ import { Pool } from "pg";
 import { randomUUID } from "crypto";
 import type { User, InsertUser, Download, InsertDownload } from "@shared/schema";
 
-const DATABASE_URL = "postgresql://neondb_owner:npg_0rVWemLcoB8u@ep-blue-flower-anzmc1ah-pooler.c-6.us-east-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require";
+const DATABASE_URL = process.env.DATABASE_URL;
+if (!DATABASE_URL) {
+  throw new Error("DATABASE_URL environment variable is not set");
+}
 
 const pool = new Pool({ connectionString: DATABASE_URL });
 
