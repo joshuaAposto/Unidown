@@ -142,7 +142,6 @@ async function analyzeYouTube(url: string): Promise<{
   author: string;
   duration: number | undefined;
   qualities: QualityOption[];
-  directUrls: Record<string, string>;
 }> {
   const info = await playDl.video_info(url);
   const d = info.video_details;
@@ -152,35 +151,38 @@ async function analyzeYouTube(url: string): Promise<{
   const author = (d.channel as any)?.name || "";
   const duration = d.durationInSec || undefined;
 
-  const directUrls: Record<string, string> = {};
-  const qualities: QualityOption[] = [];
+  const qualities: QualityOption[] = [
+    { key: "video", label: "MP4", sublabel: "360p", ext: "mp4", formatStr: "yt_playdl_video" },
+    { key: "audio", label: "MP3", sublabel: "Audio only", ext: "mp3", formatStr: "yt_playdl_audio" },
+  ];
 
-  const progressiveFormats = (info.format || []).filter((f: any) => f.url && f.mimeType?.includes("video/mp4"));
-  const videoUrl = progressiveFormats.length > 0 ? progressiveFormats[0].url : null;
-  const qualityLabel = progressiveFormats.length > 0 ? progressiveFormats[0].qualityLabel || "360p" : "360p";
+  return { title, thumbnail, author, duration, qualities };
+}
 
-  if (videoUrl) {
-    directUrls["video"] = videoUrl;
-    qualities.push({
-      key: "video",
-      label: "MP4",
-      sublabel: qualityLabel,
-      ext: "mp4",
-      formatStr: `yt_direct:${videoUrl}`,
+async function getYouTubeCdnUrl(youtubeUrl: string, wantAudio = false): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const fmt = wantAudio ? "bestaudio[ext=m4a]/bestaudio" : "best[height<=360][ext=mp4]/best[height<=360]";
+    const args = [
+      "--get-url", "--no-playlist", "--no-warnings",
+      "--extractor-args", "youtube:skip=dash",
+      "-f", fmt,
+      youtubeUrl,
+    ];
+    const proc = spawn(YTDLP_BIN, args);
+    let out = "";
+    let err = "";
+    proc.stdout.on("data", (d: Buffer) => { out += d.toString(); });
+    proc.stderr.on("data", (d: Buffer) => { err += d.toString(); });
+    proc.on("close", (code) => {
+      const cdnUrl = out.trim().split("\n")[0].trim();
+      if (cdnUrl && cdnUrl.startsWith("http")) {
+        resolve(cdnUrl);
+      } else {
+        reject(new Error("yt-dlp could not get a YouTube CDN URL: " + err.slice(0, 300)));
+      }
     });
-    qualities.push({
-      key: "audio",
-      label: "MP3",
-      sublabel: "Audio only",
-      ext: "mp3",
-      formatStr: `yt_audio_from:${videoUrl}`,
-    });
-  } else {
-    qualities.push({ key: "video", label: "MP4", sublabel: "360p", ext: "mp4", formatStr: "yt_direct_fetch" });
-    qualities.push({ key: "audio", label: "MP3", sublabel: "Audio only", ext: "mp3", formatStr: "yt_audio_fetch" });
-  }
-
-  return { title, thumbnail, author, duration, qualities, directUrls };
+    proc.on("error", (e) => reject(e));
+  });
 }
 
 async function resolveRedirect(url: string): Promise<string> {
@@ -583,13 +585,21 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       return;
     }
 
-    if (formatStr.startsWith("yt_direct:")) {
-      const ytVideoUrl = formatStr.slice("yt_direct:".length);
+    if (formatStr === "yt_playdl_video" || formatStr.startsWith("yt_direct:")) {
+      res.setHeader("Content-Type", "video/mp4");
+      res.setHeader("Content-Disposition", `attachment; filename="${safeTitle}.mp4"`);
       try {
-        const fileRes = await axios.get(ytVideoUrl, {
+        const cdnUrl = formatStr.startsWith("yt_direct:")
+          ? formatStr.slice("yt_direct:".length)
+          : await getYouTubeCdnUrl(url);
+        const fileRes = await axios.get(cdnUrl, {
           responseType: "stream",
           timeout: 120000,
-          headers: { "User-Agent": AXIOS_UA },
+          headers: {
+            "User-Agent": AXIOS_UA,
+            "Referer": "https://www.youtube.com/",
+            "Origin": "https://www.youtube.com",
+          },
         });
         if (fileRes.headers["content-length"]) res.setHeader("Content-Length", fileRes.headers["content-length"]);
         res.on("error", () => {});
@@ -601,15 +611,21 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       return;
     }
 
-    if (formatStr.startsWith("yt_audio_from:")) {
-      const srcVideoUrl = formatStr.slice("yt_audio_from:".length);
+    if (formatStr === "yt_playdl_audio" || formatStr.startsWith("yt_audio_from:")) {
       res.setHeader("Content-Type", "audio/mpeg");
       res.setHeader("Content-Disposition", `attachment; filename="${safeTitle}.mp3"`);
       try {
-        const videoRes = await axios.get(srcVideoUrl, {
+        const cdnUrl = formatStr.startsWith("yt_audio_from:")
+          ? formatStr.slice("yt_audio_from:".length)
+          : await getYouTubeCdnUrl(url, true);
+        const videoRes = await axios.get(cdnUrl, {
           responseType: "stream",
           timeout: 120000,
-          headers: { "User-Agent": AXIOS_UA },
+          headers: {
+            "User-Agent": AXIOS_UA,
+            "Referer": "https://www.youtube.com/",
+            "Origin": "https://www.youtube.com",
+          },
         });
         const ffProc = spawn(FFMPEG_BIN, [
           "-i", "pipe:0", "-f", "mp3", "-b:a", "192k", "-vn", "-write_xing", "0", "pipe:1",
