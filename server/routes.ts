@@ -8,6 +8,7 @@ import { resolve } from "path";
 import { execFile, spawn } from "child_process";
 import { promisify } from "util";
 import { ensureYtdlp, FFMPEG_BIN } from "./binaries";
+import ytdl from "@distube/ytdl-core";
 
 const execFileAsync = promisify(execFile);
 let YTDLP_BIN = resolve(process.cwd(), "bin/yt-dlp");
@@ -135,41 +136,44 @@ async function analyzeInstagram(url: string, platform: string): Promise<any> {
   return { title, platform, thumbnail, downloadable: true, qualities };
 }
 
-const CC_YT_API = "https://cc-project-apis-jonell-magallanes.onrender.com/api/yt?url=";
-
-async function ccYouTubeGetInfo(url: string): Promise<{
+async function analyzeYouTube(url: string): Promise<{
   title: string;
   thumbnail: string;
   author: string;
+  duration: number | undefined;
   qualities: QualityOption[];
 }> {
-  const apiUrl = `${CC_YT_API}${encodeURIComponent(url)}`;
-  const res = await axios.get(apiUrl, { timeout: 30000 });
-  const body = res.data;
-  const data = body?.url?.data;
-  if (!body?.url?.status || !data?.video) throw new Error("CC YT API returned failure or no video");
+  const info = await ytdl.getInfo(url, {
+    requestOptions: { headers: { "User-Agent": AXIOS_UA } },
+  });
 
-  const videoUrl: string = data.video;
-  const thumbnail: string = data.picture || "";
-  const author: string = data.author?.name || "";
+  const details = info.videoDetails;
+  const title = details.title || "YouTube Video";
+  const thumbnail = details.thumbnails?.slice(-1)[0]?.url || "";
+  const author = details.author?.name || "";
+  const duration = details.lengthSeconds ? parseInt(details.lengthSeconds) : undefined;
 
-  let title = "YouTube Video";
-  try {
-    const fnMatch = videoUrl.match(/[?&]fn=([^&]+)/);
-    if (fnMatch) title = decodeURIComponent(fnMatch[1]);
-  } catch {}
+  const formats = info.formats;
+  const hasHD = formats.some((f) => f.hasVideo && f.hasAudio && f.height && f.height >= 720);
+  const hasSD = formats.some((f) => f.hasVideo && f.hasAudio && f.height && f.height <= 480);
+  const hasAudio = formats.some((f) => f.hasAudio);
 
-  const qualities: QualityOption[] = [
-    {
-      key: "video",
-      label: "MP4",
-      sublabel: "360p",
-      ext: "mp4",
-      formatStr: `yt_direct:${videoUrl}`,
-    },
-  ];
+  const qualities: QualityOption[] = [];
 
-  return { title, thumbnail, author, qualities };
+  if (hasHD) {
+    qualities.push({ key: "hd", label: "HD MP4", sublabel: "720p+", ext: "mp4", formatStr: "yt_ytdl_hd" });
+  }
+  if (hasSD) {
+    qualities.push({ key: "sd", label: "SD MP4", sublabel: "360p–480p", ext: "mp4", formatStr: "yt_ytdl_sd" });
+  }
+  if (!hasHD && !hasSD) {
+    qualities.push({ key: "best", label: "MP4", sublabel: "Best available", ext: "mp4", formatStr: "yt_ytdl_best" });
+  }
+  if (hasAudio) {
+    qualities.push({ key: "audio", label: "MP3", sublabel: "Audio only", ext: "mp3", formatStr: "yt_ytdl_audio" });
+  }
+
+  return { title, thumbnail, author, duration, qualities };
 }
 
 async function resolveRedirect(url: string): Promise<string> {
@@ -373,18 +377,19 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     const isYouTubeUrl = /youtube\.com|youtu\.be/i.test(url);
     if (isYouTubeUrl) {
       try {
-        const info = await ccYouTubeGetInfo(url);
+        const info = await analyzeYouTube(url);
         return res.json({
           title: info.title,
           platform: "YouTube",
           thumbnail: info.thumbnail,
           downloadable: true,
           uploader: info.author || undefined,
+          duration: info.duration,
           qualities: info.qualities,
         });
       } catch (e: any) {
-        console.error("CC YT API failed:", e.message);
-        return res.status(500).json({ error: "Could not fetch YouTube video. Try again later." });
+        console.error("YouTube analyze failed:", e.message);
+        return res.status(500).json({ error: "Could not fetch YouTube video. Make sure it's a public video and try again." });
       }
     }
 
@@ -584,6 +589,62 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         fileRes.data.pipe(res);
       } catch (err: any) {
         console.error("YT direct download error:", err.message);
+        if (!res.headersSent) res.status(500).json({ error: "YouTube download failed: " + err.message });
+      }
+      return;
+    }
+
+    if (formatStr.startsWith("yt_ytdl_")) {
+      const ytQuality = formatStr.slice("yt_ytdl_".length);
+      const isYtAudio = ytQuality === "audio";
+
+      try {
+        let ytdlOptions: Parameters<typeof ytdl>[1] = {
+          requestOptions: { headers: { "User-Agent": AXIOS_UA } },
+        };
+
+        if (isYtAudio) {
+          ytdlOptions.quality = "highestaudio";
+          ytdlOptions.filter = "audioonly";
+          res.setHeader("Content-Type", "audio/mpeg");
+          res.setHeader("Content-Disposition", `attachment; filename="${safeTitle}.mp3"`);
+
+          const ytStream = ytdl(url, ytdlOptions);
+          const ffProc = spawn(FFMPEG_BIN, [
+            "-i", "pipe:0", "-f", "mp3", "-b:a", "192k", "-vn", "-write_xing", "0", "pipe:1",
+          ], { stdio: ["pipe", "pipe", "pipe"] });
+
+          ytStream.pipe(ffProc.stdin);
+          res.on("error", () => {});
+          ffProc.stdout.pipe(res);
+          ffProc.stderr.on("data", () => {});
+          ytStream.on("error", (e) => { console.error("ytdl audio stream:", e.message); ffProc.kill("SIGTERM"); });
+          ffProc.on("error", (e) => { console.error("ffmpeg audio:", e.message); if (!res.headersSent) res.status(500).end(); });
+          req.on("close", () => { ytStream.destroy(); ffProc.kill("SIGTERM"); });
+        } else {
+          if (ytQuality === "hd") {
+            ytdlOptions.filter = (f) => !!(f.hasVideo && f.hasAudio && f.container === "mp4" && f.height && f.height >= 720);
+          } else if (ytQuality === "sd") {
+            ytdlOptions.filter = (f) => !!(f.hasVideo && f.hasAudio && f.container === "mp4" && f.height && f.height <= 480);
+          } else {
+            ytdlOptions.filter = (f) => !!(f.hasVideo && f.hasAudio && f.container === "mp4");
+          }
+          ytdlOptions.quality = "highest";
+
+          res.setHeader("Content-Type", "video/mp4");
+          res.setHeader("Content-Disposition", `attachment; filename="${safeTitle}.mp4"`);
+
+          const ytStream = ytdl(url, ytdlOptions);
+          res.on("error", () => {});
+          ytStream.pipe(res);
+          ytStream.on("error", (e) => {
+            console.error("ytdl video stream:", e.message);
+            if (!res.headersSent) res.status(500).end();
+          });
+          req.on("close", () => ytStream.destroy());
+        }
+      } catch (err: any) {
+        console.error("YouTube ytdl download error:", err.message);
         if (!res.headersSent) res.status(500).json({ error: "YouTube download failed: " + err.message });
       }
       return;
