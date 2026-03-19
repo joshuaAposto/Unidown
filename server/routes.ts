@@ -8,7 +8,6 @@ import { resolve } from "path";
 import { execFile, spawn } from "child_process";
 import { promisify } from "util";
 import { ensureYtdlp, FFMPEG_BIN } from "./binaries";
-import * as playDl from "play-dl";
 
 const execFileAsync = promisify(execFile);
 let YTDLP_BIN = resolve(process.cwd(), "bin/yt-dlp");
@@ -136,61 +135,41 @@ async function analyzeInstagram(url: string, platform: string): Promise<any> {
   return { title, platform, thumbnail, downloadable: true, qualities };
 }
 
-async function analyzeYouTube(url: string): Promise<{
+const CC_YT_API = "https://cc-project-apis-jonell-magallanes.onrender.com/api/yt?url=";
+
+async function ccYouTubeGetInfo(url: string): Promise<{
   title: string;
   thumbnail: string;
   author: string;
-  duration: number | undefined;
   qualities: QualityOption[];
 }> {
-  const info = await playDl.video_info(url);
-  const d = info.video_details;
+  const apiUrl = `${CC_YT_API}${encodeURIComponent(url)}`;
+  const res = await axios.get(apiUrl, { timeout: 30000 });
+  const body = res.data;
+  const data = body?.url?.data;
+  if (!body?.url?.status || !data?.video) throw new Error("CC YT API returned failure or no video");
 
-  const title = d.title || "YouTube Video";
-  const thumbnail = (d.thumbnails as any[])?.slice(-1)[0]?.url || "";
-  const author = (d.channel as any)?.name || "";
-  const duration = d.durationInSec || undefined;
+  const videoUrl: string = data.video;
+  const thumbnail: string = data.picture || "";
+  const author: string = data.author?.name || "";
+
+  let title = "YouTube Video";
+  try {
+    const fnMatch = videoUrl.match(/[?&]fn=([^&]+)/);
+    if (fnMatch) title = decodeURIComponent(fnMatch[1]);
+  } catch {}
 
   const qualities: QualityOption[] = [
-    { key: "video", label: "MP4", sublabel: "360p", ext: "mp4", formatStr: "yt_playdl_video" },
-    { key: "audio", label: "MP3", sublabel: "Audio only", ext: "mp3", formatStr: "yt_playdl_audio" },
+    {
+      key: "video",
+      label: "MP4",
+      sublabel: "360p",
+      ext: "mp4",
+      formatStr: `yt_direct:${videoUrl}`,
+    },
   ];
 
-  return { title, thumbnail, author, duration, qualities };
-}
-
-async function getYouTubeCdnUrl(youtubeUrl: string, wantAudio = false): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const fmt = wantAudio ? "bestaudio[ext=m4a]/bestaudio" : "best[height<=360][ext=mp4]/best[height<=360]";
-    const args = [
-      "--get-url", "--no-playlist", "--no-warnings",
-      "--socket-timeout", "20",
-      "--extractor-args", "youtube:skip=dash",
-      "-f", fmt,
-      youtubeUrl,
-    ];
-    console.log(`[yt] getYouTubeCdnUrl: ${youtubeUrl} wantAudio=${wantAudio}`);
-    const proc = spawn(YTDLP_BIN, args);
-    let out = "";
-    let err = "";
-    const timer = setTimeout(() => {
-      proc.kill("SIGTERM");
-      reject(new Error("yt-dlp timed out after 30s getting YouTube URL"));
-    }, 30000);
-    proc.stdout.on("data", (d: Buffer) => { out += d.toString(); });
-    proc.stderr.on("data", (d: Buffer) => { err += d.toString(); });
-    proc.on("close", () => {
-      clearTimeout(timer);
-      const cdnUrl = out.trim().split("\n")[0].trim();
-      console.log(`[yt] yt-dlp result: ${cdnUrl ? cdnUrl.slice(0, 80) : "(empty)"} err: ${err.slice(0, 200)}`);
-      if (cdnUrl && cdnUrl.startsWith("http")) {
-        resolve(cdnUrl);
-      } else {
-        reject(new Error("yt-dlp could not get a YouTube CDN URL: " + err.slice(0, 300)));
-      }
-    });
-    proc.on("error", (e) => { clearTimeout(timer); reject(e); });
-  });
+  return { title, thumbnail, author, qualities };
 }
 
 async function resolveRedirect(url: string): Promise<string> {
@@ -394,19 +373,18 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     const isYouTubeUrl = /youtube\.com|youtu\.be/i.test(url);
     if (isYouTubeUrl) {
       try {
-        const info = await analyzeYouTube(url);
+        const info = await ccYouTubeGetInfo(url);
         return res.json({
           title: info.title,
           platform: "YouTube",
           thumbnail: info.thumbnail,
           downloadable: true,
           uploader: info.author || undefined,
-          duration: info.duration,
           qualities: info.qualities,
         });
       } catch (e: any) {
-        console.error("YouTube analyze failed:", e.message);
-        return res.status(500).json({ error: "Could not fetch YouTube video. Make sure it's a public video and try again." });
+        console.error("CC YT API failed:", e.message);
+        return res.status(500).json({ error: "Could not fetch YouTube video. Try again later." });
       }
     }
 
@@ -593,21 +571,13 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       return;
     }
 
-    if (formatStr === "yt_playdl_video" || formatStr.startsWith("yt_direct:")) {
-      res.setHeader("Content-Type", "video/mp4");
-      res.setHeader("Content-Disposition", `attachment; filename="${safeTitle}.mp4"`);
+    if (formatStr.startsWith("yt_direct:")) {
+      const ytVideoUrl = formatStr.slice("yt_direct:".length);
       try {
-        const cdnUrl = formatStr.startsWith("yt_direct:")
-          ? formatStr.slice("yt_direct:".length)
-          : await getYouTubeCdnUrl(url);
-        const fileRes = await axios.get(cdnUrl, {
+        const fileRes = await axios.get(ytVideoUrl, {
           responseType: "stream",
           timeout: 120000,
-          headers: {
-            "User-Agent": AXIOS_UA,
-            "Referer": "https://www.youtube.com/",
-            "Origin": "https://www.youtube.com",
-          },
+          headers: { "User-Agent": AXIOS_UA },
         });
         if (fileRes.headers["content-length"]) res.setHeader("Content-Length", fileRes.headers["content-length"]);
         res.on("error", () => {});
@@ -615,38 +585,6 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       } catch (err: any) {
         console.error("YT direct download error:", err.message);
         if (!res.headersSent) res.status(500).json({ error: "YouTube download failed: " + err.message });
-      }
-      return;
-    }
-
-    if (formatStr === "yt_playdl_audio" || formatStr.startsWith("yt_audio_from:")) {
-      res.setHeader("Content-Type", "audio/mpeg");
-      res.setHeader("Content-Disposition", `attachment; filename="${safeTitle}.mp3"`);
-      try {
-        const cdnUrl = formatStr.startsWith("yt_audio_from:")
-          ? formatStr.slice("yt_audio_from:".length)
-          : await getYouTubeCdnUrl(url, true);
-        const videoRes = await axios.get(cdnUrl, {
-          responseType: "stream",
-          timeout: 120000,
-          headers: {
-            "User-Agent": AXIOS_UA,
-            "Referer": "https://www.youtube.com/",
-            "Origin": "https://www.youtube.com",
-          },
-        });
-        const ffProc = spawn(FFMPEG_BIN, [
-          "-i", "pipe:0", "-f", "mp3", "-b:a", "192k", "-vn", "-write_xing", "0", "pipe:1",
-        ], { stdio: ["pipe", "pipe", "pipe"] });
-        videoRes.data.pipe(ffProc.stdin);
-        res.on("error", () => {});
-        ffProc.stdout.pipe(res);
-        ffProc.stderr.on("data", () => {});
-        ffProc.on("error", (e) => { console.error("ffmpeg yt audio:", e.message); if (!res.headersSent) res.status(500).end(); });
-        req.on("close", () => { ffProc.kill("SIGTERM"); });
-      } catch (err: any) {
-        console.error("YouTube audio extract error:", err.message);
-        if (!res.headersSent) res.status(500).json({ error: "YouTube audio extraction failed: " + err.message });
       }
       return;
     }
