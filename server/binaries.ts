@@ -13,12 +13,10 @@ const _require = createRequire(
 // ffmpeg-static bundles a portable ffmpeg binary that works on any platform
 export const FFMPEG_BIN: string = _require("ffmpeg-static");
 
-// Use /tmp on production (e.g. Render) since the app directory is read-only;
-// Render sets RENDER=true automatically; also check NODE_ENV as a fallback.
-const BIN_DIR = (process.env.RENDER || process.env.NODE_ENV === "production")
-  ? "/tmp/ytdlp-bin"
-  : resolve(process.cwd(), "bin");
-const YTDLP_PATH = resolve(BIN_DIR, "yt-dlp");
+// Prefer the committed binary in bin/yt-dlp — it's tracked in git and works on Linux x86_64.
+// Fall back to downloading fresh only if the committed binary doesn't exist.
+const COMMITTED_BIN = resolve(process.cwd(), "bin/yt-dlp");
+const TMP_BIN = "/tmp/ytdlp-bin/yt-dlp";
 
 function getYtdlpUrl(): string {
   const os = platform();
@@ -26,9 +24,7 @@ function getYtdlpUrl(): string {
 
   if (os === "win32") return "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe";
   if (os === "darwin") {
-    return cpu === "arm64"
-      ? "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_macos"
-      : "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_macos";
+    return "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_macos";
   }
   // Linux (x86_64 or arm64)
   if (cpu === "arm64" || cpu === "aarch64") {
@@ -60,25 +56,36 @@ function download(url: string, dest: string): Promise<void> {
 }
 
 export async function ensureYtdlp(): Promise<string> {
-  if (existsSync(YTDLP_PATH)) {
-    try { chmodSync(YTDLP_PATH, 0o755); } catch {}
-    return YTDLP_PATH;
+  // First choice: committed binary (present in git, deployed to all environments)
+  if (existsSync(COMMITTED_BIN)) {
+    try { chmodSync(COMMITTED_BIN, 0o755); } catch {}
+    console.log(`[binaries] Using committed yt-dlp binary: ${COMMITTED_BIN}`);
+    return COMMITTED_BIN;
   }
 
+  // Second choice: previously downloaded binary in /tmp
+  if (existsSync(TMP_BIN)) {
+    try { chmodSync(TMP_BIN, 0o755); } catch {}
+    console.log(`[binaries] Using cached yt-dlp binary: ${TMP_BIN}`);
+    return TMP_BIN;
+  }
+
+  // Last resort: download from GitHub
   console.log("[binaries] yt-dlp binary not found — downloading from GitHub...");
-  if (!existsSync(BIN_DIR)) mkdirSync(BIN_DIR, { recursive: true });
+  const dir = "/tmp/ytdlp-bin";
+  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
 
   const url = getYtdlpUrl();
   console.log(`[binaries] Downloading: ${url}`);
 
   try {
-    await download(url, YTDLP_PATH);
-    chmodSync(YTDLP_PATH, 0o755);
+    await download(url, TMP_BIN);
+    chmodSync(TMP_BIN, 0o755);
     console.log("[binaries] yt-dlp downloaded and ready.");
   } catch (err) {
     console.error("[binaries] Failed to download yt-dlp:", err);
     throw err;
   }
 
-  return YTDLP_PATH;
+  return TMP_BIN;
 }

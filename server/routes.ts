@@ -164,24 +164,32 @@ async function getYouTubeCdnUrl(youtubeUrl: string, wantAudio = false): Promise<
     const fmt = wantAudio ? "bestaudio[ext=m4a]/bestaudio" : "best[height<=360][ext=mp4]/best[height<=360]";
     const args = [
       "--get-url", "--no-playlist", "--no-warnings",
+      "--socket-timeout", "20",
       "--extractor-args", "youtube:skip=dash",
       "-f", fmt,
       youtubeUrl,
     ];
+    console.log(`[yt] getYouTubeCdnUrl: ${youtubeUrl} wantAudio=${wantAudio}`);
     const proc = spawn(YTDLP_BIN, args);
     let out = "";
     let err = "";
+    const timer = setTimeout(() => {
+      proc.kill("SIGTERM");
+      reject(new Error("yt-dlp timed out after 30s getting YouTube URL"));
+    }, 30000);
     proc.stdout.on("data", (d: Buffer) => { out += d.toString(); });
     proc.stderr.on("data", (d: Buffer) => { err += d.toString(); });
-    proc.on("close", (code) => {
+    proc.on("close", () => {
+      clearTimeout(timer);
       const cdnUrl = out.trim().split("\n")[0].trim();
+      console.log(`[yt] yt-dlp result: ${cdnUrl ? cdnUrl.slice(0, 80) : "(empty)"} err: ${err.slice(0, 200)}`);
       if (cdnUrl && cdnUrl.startsWith("http")) {
         resolve(cdnUrl);
       } else {
         reject(new Error("yt-dlp could not get a YouTube CDN URL: " + err.slice(0, 300)));
       }
     });
-    proc.on("error", (e) => reject(e));
+    proc.on("error", (e) => { clearTimeout(timer); reject(e); });
   });
 }
 
