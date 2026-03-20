@@ -135,41 +135,50 @@ async function analyzeInstagram(url: string, platform: string): Promise<any> {
   return { title, platform, thumbnail, downloadable: true, qualities };
 }
 
-const CC_YT_API = "https://cc-project-apis-jonell-magallanes.onrender.com/api/yt?url=";
-
-async function ccYouTubeGetInfo(url: string): Promise<{
+async function newYouTubeGetInfo(url: string): Promise<{
   title: string;
   thumbnail: string;
   author: string;
   qualities: QualityOption[];
 }> {
-  const apiUrl = `${CC_YT_API}${encodeURIComponent(url)}`;
-  const res = await axios.get(apiUrl, { timeout: 30000 });
-  const body = res.data;
-  const data = body?.url?.data;
-  if (!body?.url?.status || !data?.video) throw new Error("CC YT API returned failure or no video");
-
-  const videoUrl: string = data.video;
-  const thumbnail: string = data.picture || "";
-  const author: string = data.author?.name || "";
-
-  let title = "YouTube Video";
-  try {
-    const fnMatch = videoUrl.match(/[?&]fn=([^&]+)/);
-    if (fnMatch) title = decodeURIComponent(fnMatch[1]);
-  } catch {}
-
-  const qualities: QualityOption[] = [
+  const res = await axios.post(
+    "https://all-social-media-downloader-seven.vercel.app/api/youtube",
+    { url },
     {
-      key: "video",
-      label: "MP4",
-      sublabel: "360p",
-      ext: "mp4",
-      formatStr: `yt_direct:${videoUrl}`,
-    },
-  ];
+      timeout: 30000,
+      headers: {
+        "Accept": "application/json, text/plain, */*",
+        "Content-Type": "application/json",
+      },
+    }
+  );
+  const data = res.data;
+  if (!data || !data.formats || data.formats.length === 0) {
+    throw new Error("YouTube API returned no formats");
+  }
 
-  return { title, thumbnail, author, qualities };
+  const qualities: QualityOption[] = data.formats.map((format: any, index: number) => {
+    const isAudio = format.type === "audio" || format.extension === "mp3";
+    const key = isAudio ? `audio_${index}` : `video_${index}`;
+    const label = isAudio
+      ? (format.extension || "mp3").toUpperCase()
+      : (format.extension || "mp4").toUpperCase();
+    const sublabel = format.quality || (isAudio ? "Audio only" : "Video");
+    return {
+      key,
+      label,
+      sublabel,
+      ext: format.extension || (isAudio ? "mp3" : "mp4"),
+      formatStr: `yt_direct:${format.url}`,
+    };
+  });
+
+  return {
+    title: data.title || "YouTube Video",
+    thumbnail: data.thumbnail || "",
+    author: data.author || "",
+    qualities,
+  };
 }
 
 async function resolveRedirect(url: string): Promise<string> {
@@ -373,7 +382,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     const isYouTubeUrl = /youtube\.com|youtu\.be/i.test(url);
     if (isYouTubeUrl) {
       try {
-        const info = await ccYouTubeGetInfo(url);
+        const info = await newYouTubeGetInfo(url);
         return res.json({
           title: info.title,
           platform: "YouTube",
@@ -383,7 +392,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           qualities: info.qualities,
         });
       } catch (e: any) {
-        console.error("CC YT API failed:", e.message);
+        console.error("YT API failed:", e.message);
         return res.status(500).json({ error: "Could not fetch YouTube video. Try again later." });
       }
     }
