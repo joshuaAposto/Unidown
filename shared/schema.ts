@@ -61,7 +61,7 @@ export interface Database {
 // ─── Quality Options ──────────────────────────────────────────────────────────
 
 export interface QualityOption {
-  key: "hd" | "sd" | "audio" | "best";
+  key: string;
   label: string;
   sublabel: string;
   ext: string;

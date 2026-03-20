@@ -157,13 +157,22 @@ async function newYouTubeGetInfo(url: string): Promise<{
     throw new Error("YouTube API returned no formats");
   }
 
-  const qualities: QualityOption[] = data.formats.map((format: any, index: number) => {
+  const keyCount: Record<string, number> = {};
+  const qualities: QualityOption[] = data.formats.map((format: any) => {
     const isAudio = format.type === "audio" || format.extension === "mp3";
-    const key = isAudio ? `audio_${index}` : `video_${index}`;
-    const label = isAudio
-      ? (format.extension || "mp3").toUpperCase()
-      : (format.extension || "mp4").toUpperCase();
-    const sublabel = format.quality || (isAudio ? "Audio only" : "Video");
+    const qualityStr: string = (format.quality || "").toLowerCase();
+    let baseKey: string;
+    if (isAudio) {
+      baseKey = "audio";
+    } else if (/hd|720|1080|1440|2160|4k/i.test(qualityStr)) {
+      baseKey = "hd";
+    } else {
+      baseKey = "sd";
+    }
+    keyCount[baseKey] = (keyCount[baseKey] || 0) + 1;
+    const key = keyCount[baseKey] === 1 ? baseKey : `${baseKey}_${keyCount[baseKey]}`;
+    const label = isAudio ? "MP3" : `${format.quality || "MP4"} MP4`;
+    const sublabel = isAudio ? (format.quality || "Audio only") : (format.extension || "mp4").toUpperCase();
     return {
       key,
       label,

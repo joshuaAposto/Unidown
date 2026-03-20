@@ -87,6 +87,12 @@ function getQualityStyle(key: string): QualityStyle {
   if (key.startsWith("audio_")) {
     return { icon: <Volume2 className="w-4 h-4" />, color: "text-violet-500", border: "border-violet-500/30", bg: "bg-violet-500/8 dark:bg-violet-500/12", hoverBg: "hover:bg-violet-500/15 dark:hover:bg-violet-500/20" };
   }
+  if (key.startsWith("hd_")) {
+    return { icon: <Film className="w-4 h-4" />, color: "text-primary", border: "border-primary/30", bg: "bg-primary/8 dark:bg-primary/12", hoverBg: "hover:bg-primary/15 dark:hover:bg-primary/20" };
+  }
+  if (key.startsWith("sd_")) {
+    return { icon: <Play className="w-4 h-4" />, color: "text-blue-400", border: "border-blue-400/30", bg: "bg-blue-400/8 dark:bg-blue-400/12", hoverBg: "hover:bg-blue-400/15 dark:hover:bg-blue-400/20" };
+  }
   if (key.startsWith("webm_")) {
     return { icon: <Film className="w-4 h-4" />, color: "text-amber-500", border: "border-amber-500/30", bg: "bg-amber-500/8 dark:bg-amber-500/12", hoverBg: "hover:bg-amber-500/15 dark:hover:bg-amber-500/20" };
   }
@@ -330,6 +336,8 @@ function getQualityLabel(key: string): { label: string; color: string } | null {
   if (!key) return null;
   if (QUALITY_LABELS_STATIC[key]) return QUALITY_LABELS_STATIC[key];
   if (key.startsWith("audio_")) return { label: "MP3", color: "text-violet-500 bg-violet-500/10" };
+  if (key.startsWith("hd_")) return { label: "HD", color: "text-primary bg-primary/10" };
+  if (key.startsWith("sd_")) return { label: "SD", color: "text-blue-400 bg-blue-400/10" };
   if (key.startsWith("webm_")) {
     const m = key.match(/(\d+)p/);
     return { label: m ? `${m[1]}p` : "WEBM", color: "text-amber-500 bg-amber-500/10" };
